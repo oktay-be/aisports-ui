@@ -4,15 +4,32 @@ export enum PostStatus {
   DISCARDED = 'DISCARDED'
 }
 
-export interface NewsEntry {
-  id: string;
-  content: string;
-  originalUrl: string;
-  timestamp: string; // ISO string
+export type SourceRegion = 'eu' | 'tr';
+
+export interface KeyEntities {
+  competitions: string[];
+  locations: string[];
+  players: string[];
+  teams: string[];
+}
+
+export interface ProcessedArticle {
+  original_url: string;
+  title: string;
+  summary: string;
   source: string;
-  characterCount: number;
+  published_date: string;
+  categories: string[];
+  key_entities: KeyEntities;
+  content_quality: 'high' | 'medium' | 'low';
+  confidence: number;
+  language: string;
+  _dedup_metadata?: any;
+}
+
+export interface NewsEntry extends ProcessedArticle {
+  id: string;
   status: PostStatus;
-  category?: string;
 }
 
 export interface FilterState {

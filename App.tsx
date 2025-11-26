@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { NewsEntry, PostStatus, FilterState, GeminiAnalysis } from './types';
+import { NewsEntry, PostStatus, FilterState, GeminiAnalysis, SourceRegion } from './types';
 import { fetchNews } from './services/dataService';
 import { analyzeNewsBatch } from './services/geminiService';
 
@@ -19,12 +19,16 @@ const XIcon = () => (
 const SparklesIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>
 );
+const MessageCircleIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>
+);
 
 const App: React.FC = () => {
   const [entries, setEntries] = useState<NewsEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
   const [analysis, setAnalysis] = useState<GeminiAnalysis | null>(null);
+  const [selectedRegion, setSelectedRegion] = useState<SourceRegion>('eu');
 
   const [filters, setFilters] = useState<FilterState>({
     search: '',
@@ -33,15 +37,20 @@ const App: React.FC = () => {
     status: 'ALL'
   });
 
-  // Initial Fetch
+  // Initial Fetch & Date Filter Watch
   useEffect(() => {
-    loadData();
-  }, []);
+    const isSingleDay = filters.startDate && filters.endDate && filters.startDate === filters.endDate;
+    if (isSingleDay) {
+      loadData(filters.startDate);
+    } else {
+      loadData();
+    }
+  }, [selectedRegion, filters.startDate, filters.endDate]);
 
-  const loadData = async () => {
+  const loadData = async (date?: string) => {
     setLoading(true);
     try {
-      const data = await fetchNews();
+      const data = await fetchNews(selectedRegion, date);
       setEntries(data);
     } catch (e) {
       console.error(e);
@@ -53,19 +62,20 @@ const App: React.FC = () => {
   // Filtering Logic
   const filteredEntries = useMemo(() => {
     return entries.filter(entry => {
-      const matchesSearch = entry.content.toLowerCase().includes(filters.search.toLowerCase()) || 
+      const matchesSearch = entry.summary.toLowerCase().includes(filters.search.toLowerCase()) || 
+                            entry.title.toLowerCase().includes(filters.search.toLowerCase()) ||
                             entry.source.toLowerCase().includes(filters.search.toLowerCase());
       
       const matchesStatus = filters.status === 'ALL' ? true : entry.status === filters.status;
       
       let matchesDate = true;
       if (filters.startDate) {
-        matchesDate = matchesDate && new Date(entry.timestamp) >= new Date(filters.startDate);
+        matchesDate = matchesDate && new Date(entry.published_date) >= new Date(filters.startDate);
       }
       if (filters.endDate) {
         const end = new Date(filters.endDate);
         end.setHours(23, 59, 59);
-        matchesDate = matchesDate && new Date(entry.timestamp) <= end;
+        matchesDate = matchesDate && new Date(entry.published_date) <= end;
       }
 
       return matchesSearch && matchesStatus && matchesDate;
@@ -100,7 +110,21 @@ const App: React.FC = () => {
             <h1 className="text-xl font-bold tracking-tight text-white">NewsPulse</h1>
           </div>
           <div className="flex items-center gap-4">
-             <span className="text-xs text-slate-500">GCP Bucket: gs://news-scraper-prod</span>
+             <div className="flex items-center gap-2 bg-slate-800 rounded-lg p-1">
+               <button 
+                 onClick={() => setSelectedRegion('eu')}
+                 className={`px-3 py-1 text-xs font-bold rounded-md transition-colors ${selectedRegion === 'eu' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}
+               >
+                 EU
+               </button>
+               <button 
+                 onClick={() => setSelectedRegion('tr')}
+                 className={`px-3 py-1 text-xs font-bold rounded-md transition-colors ${selectedRegion === 'tr' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}
+               >
+                 TR
+               </button>
+             </div>
+             <span className="text-xs text-slate-500 hidden sm:inline">GCP Bucket: gs://news-scraper-prod</span>
              <button onClick={loadData} className="p-2 hover:bg-slate-800 rounded-full transition-colors text-slate-400 hover:text-white">
                <RefreshIcon />
              </button>
@@ -242,6 +266,11 @@ const NewsCard: React.FC<{
   onPost: (id: string) => void;
   onDiscard: (id: string) => void;
 }> = ({ entry, onPost, onDiscard }) => {
+  const [chatMessages, setChatMessages] = useState<Array<{role: 'user' | 'assistant', text: string}>>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [isSending, setIsSending] = useState(false);
+  const [showChat, setShowChat] = useState(false);
+  
   const isPosted = entry.status === PostStatus.POSTED;
   const isDiscarded = entry.status === PostStatus.DISCARDED;
   
@@ -251,6 +280,25 @@ const NewsCard: React.FC<{
     if (diff < 1) return '< 1h ago';
     if (diff < 24) return `${Math.floor(diff)}h ago`;
     return `${Math.floor(diff / 24)}d ago`;
+  };
+
+  const handleSendMessage = async () => {
+    if (!chatInput.trim() || isSending) return;
+    
+    const userMessage = chatInput.trim();
+    setChatInput('');
+    setChatMessages(prev => [...prev, { role: 'user', text: userMessage }]);
+    
+    setIsSending(true);
+    // TODO: Connect to backend for AI inference
+    // Placeholder response for now
+    setTimeout(() => {
+      setChatMessages(prev => [...prev, { 
+        role: 'assistant', 
+        text: 'AI response will appear here once backend is connected.' 
+      }]);
+      setIsSending(false);
+    }, 500);
   };
 
   return (
@@ -272,13 +320,25 @@ const NewsCard: React.FC<{
       <div>
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <span className="bg-slate-800 text-slate-300 text-[10px] font-bold px-2 py-1 rounded uppercase tracking-wider">
+            <a 
+              href={entry.original_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="bg-slate-800 text-slate-300 text-[10px] font-bold px-2 py-1 rounded uppercase tracking-wider hover:bg-slate-700 hover:text-white transition-colors"
+            >
               {entry.source}
+            </a>
+            <span className="text-xs text-slate-500">{timeAgo(entry.published_date)}</span>
+            <span className={`text-[10px] px-1.5 py-0.5 rounded border ${
+              entry.content_quality === 'high' ? 'border-green-800 text-green-400 bg-green-900/20' : 
+              entry.content_quality === 'medium' ? 'border-yellow-800 text-yellow-400 bg-yellow-900/20' : 
+              'border-red-800 text-red-400 bg-red-900/20'
+            }`}>
+              {entry.content_quality.toUpperCase()}
             </span>
-            <span className="text-xs text-slate-500">{timeAgo(entry.timestamp)}</span>
           </div>
           <a 
-            href={entry.originalUrl} 
+            href={entry.original_url} 
             target="_blank" 
             rel="noopener noreferrer"
             className="text-slate-500 hover:text-blue-400 transition-colors"
@@ -288,15 +348,92 @@ const NewsCard: React.FC<{
           </a>
         </div>
 
-        <p className="text-slate-200 text-sm leading-relaxed mb-4 font-medium">
-          {entry.content}
+        <h3 className="text-white font-bold text-lg mb-2 leading-tight">{entry.title}</h3>
+        
+        <p className="text-slate-300 text-sm leading-relaxed mb-4">
+          {entry.summary}
         </p>
+
+        {/* Categories/Tags */}
+        <div className="flex flex-wrap gap-1.5 mb-4">
+          {entry.categories.slice(0, 3).map((cat, idx) => (
+            <span key={idx} className="px-2 py-0.5 bg-slate-800 text-slate-400 text-[10px] rounded-full border border-slate-700">
+              #{cat}
+            </span>
+          ))}
+          {entry.categories.length > 3 && (
+            <span className="px-2 py-0.5 text-slate-500 text-[10px]">+{entry.categories.length - 3}</span>
+          )}
+        </div>
+
+        {/* Chat Section */}
+        {showChat && (
+          <div className="mt-4 mb-4 border border-slate-800 rounded-lg bg-slate-950/50 overflow-hidden animate-fade-in">
+            {/* Chat Messages */}
+            <div className="max-h-48 overflow-y-auto p-3 space-y-2">
+              {chatMessages.length === 0 ? (
+                <div className="text-xs text-slate-600 text-center py-4">
+                  Ask questions about this news item...
+                </div>
+              ) : (
+                chatMessages.map((msg, idx) => (
+                  <div key={idx} className={`text-xs ${msg.role === 'user' ? 'text-right' : 'text-left'}`}>
+                    <div className={`inline-block max-w-[80%] px-3 py-2 rounded-lg ${
+                      msg.role === 'user' 
+                        ? 'bg-blue-600 text-white' 
+                        : 'bg-slate-800 text-slate-200'
+                    }`}>
+                      {msg.text}
+                    </div>
+                  </div>
+                ))
+              )}
+              {isSending && (
+                <div className="text-left text-xs">
+                  <div className="inline-block bg-slate-800 text-slate-400 px-3 py-2 rounded-lg">
+                    Thinking...
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Chat Input */}
+            <div className="border-t border-slate-800 p-2 flex gap-2">
+              <input
+                type="text"
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+                placeholder="Ask something..."
+                disabled={isSending}
+                className="flex-1 bg-slate-900 border border-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 focus:outline-none focus:border-blue-500 placeholder-slate-600 disabled:opacity-50"
+              />
+              <button
+                onClick={handleSendMessage}
+                disabled={isSending || !chatInput.trim()}
+                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Send
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="pt-4 border-t border-slate-800/50 flex items-center justify-between">
-        <span className={`text-xs font-mono ${entry.characterCount > 140 ? 'text-red-400' : 'text-slate-500'}`}>
-          {entry.characterCount}/140
-        </span>
+        <div className="flex items-center gap-3">
+          <span className={`text-xs font-mono ${entry.summary.length > 280 ? 'text-red-400' : 'text-slate-500'}`}>
+            {entry.summary.length} chars
+          </span>
+          
+          <button 
+            onClick={() => setShowChat(!showChat)}
+            className={`p-1.5 rounded-lg transition-colors ${showChat ? 'bg-blue-500/20 text-blue-400' : 'text-slate-500 hover:text-blue-400 hover:bg-slate-800'}`}
+            title="Toggle Chat"
+          >
+            <MessageCircleIcon />
+          </button>
+        </div>
 
         {!isPosted && !isDiscarded && (
           <div className="flex items-center gap-2">
