@@ -54,6 +54,13 @@ const gcsProxyPlugin = () => {
             const [year, month] = dateParam.split('-');
             prefix = `news_data/batch_processing/${region}/${year}-${month}/${dateParam}/`;
             console.log(`Targeting specific date: ${dateParam}`);
+          } else {
+            // Default: Get current month's data
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            prefix = `news_data/batch_processing/${region}/${year}-${month}/`;
+            console.log(`Defaulting to current month: ${year}-${month}`);
           }
           
           console.log(`Looking for files in ${bucketName} with prefix ${prefix}...`);
@@ -83,10 +90,9 @@ const gcsProxyPlugin = () => {
             filesToProcess = resultFiles;
             console.log(`Found ${filesToProcess.length} runs for date ${dateParam}`);
           } else {
-            // Default behavior: Get the single latest file
-            resultFiles.sort((a, b) => b.name.localeCompare(a.name));
-            filesToProcess = [resultFiles[0]];
-            console.log(`Defaulting to latest file: ${filesToProcess[0].name}`);
+            // Default behavior: Get ALL files from current month
+            filesToProcess = resultFiles;
+            console.log(`Found ${filesToProcess.length} files for current month`);
           }
 
           let allArticles: any[] = [];
