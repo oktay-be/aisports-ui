@@ -22,6 +22,12 @@ const SparklesIcon = () => (
 const MessageCircleIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>
 );
+const TwitterIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+);
+const TranslateIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></svg>
+);
 
 const App: React.FC = () => {
   const [entries, setEntries] = useState<NewsEntry[]>([]);
@@ -270,6 +276,8 @@ const NewsCard: React.FC<{
   const [chatInput, setChatInput] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [showChat, setShowChat] = useState(false);
+  const [showXPost, setShowXPost] = useState(false);
+  const [showTranslation, setShowTranslation] = useState(false);
   
   const isPosted = entry.status === PostStatus.POSTED;
   const isDiscarded = entry.status === PostStatus.DISCARDED;
@@ -350,9 +358,34 @@ const NewsCard: React.FC<{
 
         <h3 className="text-white font-bold text-lg mb-2 leading-tight">{entry.title}</h3>
         
-        <p className="text-slate-300 text-sm leading-relaxed mb-4">
-          {entry.summary}
-        </p>
+        <div className="relative group/summary">
+          <p className="text-slate-300 text-sm leading-relaxed mb-4 transition-all duration-300">
+            {showTranslation && entry.summary_translation ? (
+              <span className="animate-fade-in">
+                <span className="text-blue-400 font-bold text-xs uppercase mr-2">[TR]</span>
+                {entry.summary_translation}
+              </span>
+            ) : (
+              entry.summary
+            )}
+          </p>
+        </div>
+
+        {/* X Post Section */}
+        {showXPost && entry.x_post && (
+          <div className="mb-4 p-3 bg-slate-950/50 border border-slate-800 rounded-lg animate-fade-in">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2 text-slate-400 text-xs font-bold uppercase tracking-wider">
+                <TwitterIcon />
+                <span>Generated Post</span>
+              </div>
+              <span className={`text-[10px] ${entry.x_post.length > 280 ? 'text-red-400' : 'text-slate-500'}`}>
+                {entry.x_post.length}/280
+              </span>
+            </div>
+            <p className="text-slate-300 text-sm whitespace-pre-wrap">{entry.x_post}</p>
+          </div>
+        )}
 
         {/* Categories/Tags */}
         <div className="flex flex-wrap gap-1.5 mb-4">
@@ -421,10 +454,28 @@ const NewsCard: React.FC<{
       </div>
 
       <div className="pt-4 border-t border-slate-800/50 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <span className={`text-xs font-mono ${entry.summary.length > 280 ? 'text-red-400' : 'text-slate-500'}`}>
-            {entry.summary.length} chars
-          </span>
+        <div className="flex items-center gap-2">
+          {/* Translation Toggle */}
+          {entry.summary_translation && (
+            <button 
+              onClick={() => setShowTranslation(!showTranslation)}
+              className={`p-1.5 rounded-lg transition-colors ${showTranslation ? 'bg-blue-500/20 text-blue-400' : 'text-slate-500 hover:text-blue-400 hover:bg-slate-800'}`}
+              title={showTranslation ? "Show Original" : "Show Translation"}
+            >
+              <TranslateIcon />
+            </button>
+          )}
+
+          {/* X Post Toggle */}
+          {entry.x_post && (
+            <button 
+              onClick={() => setShowXPost(!showXPost)}
+              className={`p-1.5 rounded-lg transition-colors ${showXPost ? 'bg-blue-500/20 text-blue-400' : 'text-slate-500 hover:text-blue-400 hover:bg-slate-800'}`}
+              title="Toggle X Post"
+            >
+              <TwitterIcon />
+            </button>
+          )}
           
           <button 
             onClick={() => setShowChat(!showChat)}

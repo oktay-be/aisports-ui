@@ -101,16 +101,42 @@ const gcsProxyPlugin = () => {
             for (const line of lines) {
               try {
                 const json = JSON.parse(line);
-                // Extract the inner JSON from the model response
+                
+                // Case 1: Vertex AI Batch Response (nested JSON in candidates)
                 if (json.response && json.response.candidates && json.response.candidates[0].content && json.response.candidates[0].content.parts) {
                   const text = json.response.candidates[0].content.parts[0].text;
                   // Clean markdown code blocks if present
                   const cleanText = text.replace(/```json\n?|\n?```/g, '');
-                  const parsedInner = JSON.parse(cleanText);
-                  
-                  if (parsedInner.processed_articles) {
-                    allArticles = [...allArticles, ...parsedInner.processed_articles];
+                  try {
+                    const parsedInner = JSON.parse(cleanText);
+                    if (parsedInner.processed_articles) {
+                      allArticles = [...allArticles, ...parsedInner.processed_articles];
+                    } else if (parsedInner.consolidated_articles) {
+                      allArticles = [...allArticles, ...parsedInner.consolidated_articles];
+                    } else if (Array.isArray(parsedInner)) {
+                      allArticles = [...allArticles, ...parsedInner];
+                    } else if (parsedInner.title) {
+                       allArticles.push(parsedInner);
+                    }
+                  } catch (e) {
+                    console.error('Error parsing inner JSON:', e);
                   }
+                }
+                // Case 2: Direct article object (flat JSONL)
+                else if (json.title && json.summary && json.original_url) {
+                   allArticles.push(json);
+                }
+                // Case 3: List of articles
+                else if (Array.isArray(json)) {
+                   allArticles = [...allArticles, ...json];
+                }
+                // Case 4: Prediction wrapper
+                else if (json.prediction) {
+                   if (Array.isArray(json.prediction)) {
+                      allArticles = [...allArticles, ...json.prediction];
+                   } else {
+                      allArticles.push(json.prediction);
+                   }
                 }
               } catch (err) {
                 console.error('Error parsing line in file ' + file.name, err);

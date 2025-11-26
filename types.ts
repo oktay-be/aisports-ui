@@ -24,6 +24,8 @@ export interface ProcessedArticle {
   content_quality: 'high' | 'medium' | 'low';
   confidence: number;
   language: string;
+  summary_translation?: string;
+  x_post?: string;
   _dedup_metadata?: any;
 }
 
