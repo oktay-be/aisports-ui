@@ -35,6 +35,8 @@ const App: React.FC = () => {
   const [analyzing, setAnalyzing] = useState(false);
   const [analysis, setAnalysis] = useState<GeminiAnalysis | null>(null);
   const [selectedRegion, setSelectedRegion] = useState<SourceRegion>('eu');
+  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
 
   const [filters, setFilters] = useState<FilterState>({
     search: '',
@@ -43,21 +45,37 @@ const App: React.FC = () => {
     status: 'ALL'
   });
 
-  // Initial Fetch & Date Filter Watch
+  // Initial Fetch & Date Filter Watch - fetch whenever dates or region change
   useEffect(() => {
     const isSingleDay = filters.startDate && filters.endDate && filters.startDate === filters.endDate;
     if (isSingleDay) {
       loadData(filters.startDate);
+    } else if (filters.startDate || filters.endDate) {
+      // If any date is set but not a single day, still trigger a fetch
+      loadData();
     } else {
       loadData();
     }
   }, [selectedRegion, filters.startDate, filters.endDate]);
+
+  // Auto-refresh every 2 minutes when enabled
+  useEffect(() => {
+    if (!autoRefresh) return;
+    
+    const interval = setInterval(() => {
+      console.log('Auto-refreshing data...');
+      loadData();
+    }, 2 * 60 * 1000); // 2 minutes
+    
+    return () => clearInterval(interval);
+  }, [autoRefresh, selectedRegion, filters.startDate, filters.endDate]);
 
   const loadData = async (date?: string) => {
     setLoading(true);
     try {
       const data = await fetchNews(selectedRegion, date);
       setEntries(data);
+      setLastUpdated(new Date());
     } catch (e) {
       console.error(e);
     } finally {
@@ -130,8 +148,21 @@ const App: React.FC = () => {
                  TR
                </button>
              </div>
-             <span className="text-xs text-slate-500 hidden sm:inline">GCP Bucket: gs://news-scraper-prod</span>
-             <button onClick={loadData} className="p-2 hover:bg-slate-800 rounded-full transition-colors text-slate-400 hover:text-white">
+             <button 
+               onClick={() => setAutoRefresh(!autoRefresh)}
+               className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                 autoRefresh 
+                   ? 'bg-green-600 text-white hover:bg-green-500' 
+                   : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white'
+               }`}
+               title={autoRefresh ? 'Auto-refresh ON (every 2 min)' : 'Auto-refresh OFF'}
+             >
+               {autoRefresh ? '🔴 LIVE' : 'LIVE'}
+             </button>
+             <span className="text-xs text-slate-500 hidden md:inline" title={lastUpdated.toLocaleString()}>
+               Updated: {lastUpdated.toLocaleTimeString()}
+             </span>
+             <button onClick={() => loadData()} className="p-2 hover:bg-slate-800 rounded-full transition-colors text-slate-400 hover:text-white" title="Refresh now">
                <RefreshIcon />
              </button>
           </div>

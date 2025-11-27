@@ -46,6 +46,8 @@ const gcsProxyPlugin = () => {
           const url = new URL(req.url || '', `http://${req.headers.host}`);
           const region = url.searchParams.get('region') || 'eu';
           const dateParam = url.searchParams.get('date'); // Expecting YYYY-MM-DD
+          const latestOnly = url.searchParams.get('latest') === 'true'; // Get only latest run
+          const lastNDays = parseInt(url.searchParams.get('last_n_days') || '0'); // Get last N days
 
           let prefix = `news_data/batch_processing/${region}/`;
           
@@ -54,6 +56,9 @@ const gcsProxyPlugin = () => {
             const [year, month] = dateParam.split('-');
             prefix = `news_data/batch_processing/${region}/${year}-${month}/${dateParam}/`;
             console.log(`Targeting specific date: ${dateParam}`);
+          } else if (lastNDays > 0) {
+            // Get data from last N days (live data mode)
+            console.log(`Fetching data from last ${lastNDays} days`);
           } else {
             // Default: Get current month's data
             const now = new Date();
@@ -70,11 +75,24 @@ const gcsProxyPlugin = () => {
           });
 
           // Filter for stage 2 prediction results
-          // We ignore stage 1 as requested
-          const resultFiles = files.filter(f => 
+          let resultFiles = files.filter(f => 
             f.name.includes('stage2_deduplication/results') && 
             f.name.endsWith('predictions.jsonl')
           );
+
+          // If fetching last N days, filter by date
+          if (lastNDays > 0) {
+            const cutoffDate = new Date();
+            cutoffDate.setDate(cutoffDate.getDate() - lastNDays);
+            resultFiles = resultFiles.filter(f => {
+              const match = f.name.match(/(\d{4})-(\d{2})-(\d{2})/);
+              if (match) {
+                const fileDate = new Date(match[0]);
+                return fileDate >= cutoffDate;
+              }
+              return false;
+            });
+          }
 
           if (resultFiles.length === 0) {
             console.log('No files found.');
@@ -83,16 +101,23 @@ const gcsProxyPlugin = () => {
             return;
           }
 
+          // Sort by name descending (latest first) - file names include timestamps
+          resultFiles.sort((a, b) => b.name.localeCompare(a.name));
+
           let filesToProcess = [];
 
-          if (dateParam) {
+          if (latestOnly) {
+            // Get only the most recent file
+            filesToProcess = [resultFiles[0]];
+            console.log(`Fetching latest file only: ${filesToProcess[0].name}`);
+          } else if (dateParam) {
             // If a specific date is selected, we get ALL runs for that day
             filesToProcess = resultFiles;
             console.log(`Found ${filesToProcess.length} runs for date ${dateParam}`);
           } else {
-            // Default behavior: Get ALL files from current month
+            // Default behavior: Get ALL files from the selected range
             filesToProcess = resultFiles;
-            console.log(`Found ${filesToProcess.length} files for current month`);
+            console.log(`Found ${filesToProcess.length} files to process`);
           }
 
           let allArticles: any[] = [];
