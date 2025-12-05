@@ -888,7 +888,9 @@ export const fetchNews = async (region: SourceRegion = 'eu', date?: string): Pro
       
       const response = await fetch(url);
       if (!response.ok) {
-        throw new Error(`API Error: ${response.statusText}`);
+        // Return empty array instead of mock data to avoid showing wrong region data
+        console.warn(`No data found for ${region}${date ? ` on ${date}` : ''}`);
+        return [];
       }
       const articles: ProcessedArticle[] = await response.json();
       
@@ -898,13 +900,7 @@ export const fetchNews = async (region: SourceRegion = 'eu', date?: string): Pro
         status: Math.random() > 0.8 ? PostStatus.POSTED : PostStatus.PENDING
       }));
     } catch (error) {
-      console.error("Failed to fetch from GCS Proxy, falling back to mock data:", error);
-      // Fallback to mock data if API fails
-      await new Promise(resolve => setTimeout(resolve, 600));
-      return MOCK_ARTICLES.map((article, index) => ({
-          ...article,
-          id: `entry-${index}`,
-          status: Math.random() > 0.8 ? PostStatus.POSTED : PostStatus.PENDING
-      }));
+      console.error("Failed to fetch news:", error);
+      return [];
     }
 };

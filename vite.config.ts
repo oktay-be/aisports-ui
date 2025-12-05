@@ -2,13 +2,17 @@ import path from 'path';
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import { Storage } from '@google-cloud/storage';
+import { PubSub } from '@google-cloud/pubsub';
 import dotenv from 'dotenv';
 import fs from 'fs';
 
-// Custom plugin to proxy GCS requests
+// Custom plugin to proxy GCS requests and handle scraper triggers
 const gcsProxyPlugin = () => {
   let storage: Storage;
   let bucketName: string;
+  let pubsub: PubSub;
+  let projectId: string;
+  let scrapingTopic: string;
 
   try {
     // Load env from sibling directory
@@ -24,7 +28,17 @@ const gcsProxyPlugin = () => {
         keyFilename: keyFilename,
       });
       bucketName = envConfig.GCS_BUCKET_NAME;
+      projectId = envConfig.GCP_PROJECT_ID;
+      scrapingTopic = envConfig.SCRAPING_REQUEST_TOPIC || 'scraping-requests';
+      
+      // Initialize Pub/Sub client
+      pubsub = new PubSub({
+        projectId: projectId,
+        keyFilename: keyFilename,
+      });
+      
       console.log(`GCS Proxy configured for bucket: ${bucketName}`);
+      console.log(`Pub/Sub configured for topic: ${scrapingTopic}`);
     } else {
       console.warn('GCS Proxy: .env file not found in ../aisports-functions/');
     }
@@ -182,6 +196,54 @@ const gcsProxyPlugin = () => {
           res.statusCode = 500;
           res.end(JSON.stringify({ error: error.message }));
         }
+      });
+
+      // Scraper trigger endpoint
+      server.middlewares.use('/api/trigger-scraper', async (req, res, next) => {
+        if (req.method !== 'POST') {
+          res.statusCode = 405;
+          res.end(JSON.stringify({ error: 'Method not allowed' }));
+          return;
+        }
+
+        if (!pubsub || !projectId || !scrapingTopic) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: 'Pub/Sub not configured' }));
+          return;
+        }
+
+        let body = '';
+        req.on('data', chunk => {
+          body += chunk.toString();
+        });
+
+        req.on('end', async () => {
+          try {
+            const payload = JSON.parse(body);
+            
+            console.log(`Triggering scraper for ${payload.collection_id}:`, payload);
+            
+            // Publish to Pub/Sub topic
+            const topicPath = pubsub.topic(scrapingTopic);
+            const dataBuffer = Buffer.from(JSON.stringify(payload));
+            
+            const messageId = await topicPath.publishMessage({ data: dataBuffer });
+            
+            console.log(`✅ Published message ${messageId} to topic ${scrapingTopic}`);
+            
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ 
+              success: true, 
+              messageId,
+              region: payload.collection_id,
+              sourcesCount: payload.urls.length 
+            }));
+          } catch (error: any) {
+            console.error('Scraper trigger error:', error);
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error: error.message }));
+          }
+        });
       });
     }
   };

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { NewsEntry, PostStatus, FilterState, GeminiAnalysis, SourceRegion } from './types';
 import { fetchNews } from './services/dataService';
 import { analyzeNewsBatch } from './services/geminiService';
+import { ScraperTrigger } from './components/ScraperTrigger';
 
 // --- Icons ---
 const RefreshIcon = () => (
@@ -37,6 +38,7 @@ const App: React.FC = () => {
   const [selectedRegion, setSelectedRegion] = useState<SourceRegion>('eu');
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
+  const [activeTab, setActiveTab] = useState<'feed' | 'scraper'>('feed');
 
   const [filters, setFilters] = useState<FilterState>({
     search: '',
@@ -92,17 +94,11 @@ const App: React.FC = () => {
       
       const matchesStatus = filters.status === 'ALL' ? true : entry.status === filters.status;
       
-      let matchesDate = true;
-      if (filters.startDate) {
-        matchesDate = matchesDate && new Date(entry.published_date) >= new Date(filters.startDate);
-      }
-      if (filters.endDate) {
-        const end = new Date(filters.endDate);
-        end.setHours(23, 59, 59);
-        matchesDate = matchesDate && new Date(entry.published_date) <= end;
-      }
+      // Note: Date filtering is handled by the API (based on scraping date),
+      // not here (which would filter by article published_date).
+      // Articles scraped on 2025-12-05 might have been published days earlier.
 
-      return matchesSearch && matchesStatus && matchesDate;
+      return matchesSearch && matchesStatus;
     });
   }, [entries, filters]);
 
@@ -127,11 +123,31 @@ const App: React.FC = () => {
       {/* Header */}
       <header className="border-b border-slate-800 bg-slate-900 sticky top-0 z-10 shadow-lg">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold">
-              NP
+          <div className="flex items-center gap-6">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold">
+                NP
+              </div>
+              <h1 className="text-xl font-bold tracking-tight text-white">NewsPulse</h1>
             </div>
-            <h1 className="text-xl font-bold tracking-tight text-white">NewsPulse</h1>
+            <div className="flex items-center gap-1 bg-slate-800 rounded-lg p-1">
+              <button
+                onClick={() => setActiveTab('feed')}
+                className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                  activeTab === 'feed' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Feed
+              </button>
+              <button
+                onClick={() => setActiveTab('scraper')}
+                className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                  activeTab === 'scraper' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Scraper
+              </button>
+            </div>
           </div>
           <div className="flex items-center gap-4">
              <div className="flex items-center gap-2 bg-slate-800 rounded-lg p-1">
@@ -171,6 +187,10 @@ const App: React.FC = () => {
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         
+        {activeTab === 'scraper' ? (
+          <ScraperTrigger />
+        ) : (
+          <>
         {/* Controls & Analysis Bar */}
         <div className="mb-8 space-y-6">
           <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between bg-slate-900 p-4 rounded-xl border border-slate-800">
@@ -292,6 +312,8 @@ const App: React.FC = () => {
                </div>
              )}
           </>
+        )}
+        </>
         )}
       </main>
     </div>
