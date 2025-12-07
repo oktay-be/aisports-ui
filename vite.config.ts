@@ -15,8 +15,8 @@ const gcsProxyPlugin = () => {
   let scrapingTopic: string;
 
   try {
-    // Load env from sibling directory
-    const envPath = path.resolve(__dirname, '../aisports-functions/.env');
+    // Load env from current directory
+    const envPath = path.resolve(__dirname, '.env');
     if (fs.existsSync(envPath)) {
       const envConfig = dotenv.parse(fs.readFileSync(envPath));
       
@@ -40,7 +40,7 @@ const gcsProxyPlugin = () => {
       console.log(`GCS Proxy configured for bucket: ${bucketName}`);
       console.log(`Pub/Sub configured for topic: ${scrapingTopic}`);
     } else {
-      console.warn('GCS Proxy: .env file not found in ../aisports-functions/');
+      console.warn('GCS Proxy: .env file not found in current directory');
     }
   } catch (e) {
     console.error('GCS Proxy Init Error:', e);
@@ -258,8 +258,7 @@ export default defineConfig(({ mode }) => {
       },
       plugins: [react(), gcsProxyPlugin()],
       define: {
-        'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
+        // 'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY), // Removed
       },
       resolve: {
         alias: {

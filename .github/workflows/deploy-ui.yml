@@ -1,0 +1,67 @@
+name: Deploy UI Function
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/**'
+      - 'public/**'
+      - 'package.json'
+      - 'vite.config.ts'
+      - 'server.js'
+      - '.github/workflows/deploy-ui.yml'
+
+  workflow_dispatch:
+
+permissions:
+  id-token: write # This is crucial for Workload Identity Federation
+  contents: read # Allow checkout action to read the repository
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+
+    - name: Install Dependencies
+      run: npm ci
+
+    - name: Build Application
+      run: npm run build
+
+    - name: Authenticate to Google Cloud (Workload Identity Federation)
+      uses: google-github-actions/auth@v2
+      with:
+        workload_identity_provider: 'projects/${{ vars.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ vars.WIF_POOL_ID }}/providers/${{ vars.WIF_PROVIDER_ID }}'
+        service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+        export_environment_variables: true
+
+    - name: Deploy Cloud Function
+      uses: google-github-actions/deploy-cloud-functions@v3
+      with:
+        name: aisports-ui
+        runtime: nodejs20
+        memory: 512Mi
+        cpu: 1
+        service_timeout: 60
+        max_instance_count: 10
+        min_instance_count: 0
+        entry_point: app
+        source_dir: .
+        trigger_http: true
+        region: ${{ vars.REGION }}
+        environment_variables: |
+          GOOGLE_CLOUD_PROJECT=${{ vars.GOOGLE_CLOUD_PROJECT }}
+          GCS_BUCKET_NAME=${{ vars.GCS_BUCKET_NAME }}
+          SCRAPING_REQUEST_TOPIC=${{ vars.SCRAPING_REQUEST_TOPIC }}
+          GOOGLE_CLIENT_ID=${{ vars.GOOGLE_CLIENT_ID }}
+        service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}

@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { NewsEntry, PostStatus, FilterState, GeminiAnalysis, SourceRegion } from './types';
 import { fetchNews } from './services/dataService';
-import { analyzeNewsBatch } from './services/geminiService';
 import { ScraperTrigger } from './components/ScraperTrigger';
 
 // --- Icons ---
@@ -31,10 +30,10 @@ const TranslateIcon = () => (
 );
 
 const App: React.FC = () => {
+  const [user, setUser] = useState<any>(null);
+  const [token, setToken] = useState<string | null>(null);
   const [entries, setEntries] = useState<NewsEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [analysis, setAnalysis] = useState<GeminiAnalysis | null>(null);
   const [selectedRegion, setSelectedRegion] = useState<SourceRegion>('eu');
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
@@ -47,8 +46,49 @@ const App: React.FC = () => {
     status: 'ALL'
   });
 
+  // Google Sign-In Initialization
+  useEffect(() => {
+    const initializeGoogleSignIn = () => {
+      if (window.google && !user) {
+        window.google.accounts.id.initialize({
+          client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
+          callback: (response: any) => {
+            const credential = response.credential;
+            setToken(credential);
+            const payload = JSON.parse(atob(credential.split('.')[1]));
+            setUser(payload);
+          }
+        });
+        
+        const buttonDiv = document.getElementById("google-signin-button");
+        if (buttonDiv) {
+          window.google.accounts.id.renderButton(
+            buttonDiv,
+            { theme: "outline", size: "large" }
+          );
+        }
+      }
+    };
+
+    // Check if script is already loaded
+    if (window.google) {
+      initializeGoogleSignIn();
+    } else {
+      // Wait for script to load
+      const interval = setInterval(() => {
+        if (window.google) {
+          initializeGoogleSignIn();
+          clearInterval(interval);
+        }
+      }, 100);
+      return () => clearInterval(interval);
+    }
+  }, [user]);
+
   // Initial Fetch & Date Filter Watch - fetch whenever dates or region change
   useEffect(() => {
+    if (!token) return; // Only fetch if authenticated
+
     const isSingleDay = filters.startDate && filters.endDate && filters.startDate === filters.endDate;
     if (isSingleDay) {
       loadData(filters.startDate);
@@ -58,11 +98,11 @@ const App: React.FC = () => {
     } else {
       loadData();
     }
-  }, [selectedRegion, filters.startDate, filters.endDate]);
+  }, [selectedRegion, filters.startDate, filters.endDate, token]);
 
   // Auto-refresh every 2 minutes when enabled
   useEffect(() => {
-    if (!autoRefresh) return;
+    if (!autoRefresh || !token) return;
     
     const interval = setInterval(() => {
       console.log('Auto-refreshing data...');
@@ -70,12 +110,13 @@ const App: React.FC = () => {
     }, 2 * 60 * 1000); // 2 minutes
     
     return () => clearInterval(interval);
-  }, [autoRefresh, selectedRegion, filters.startDate, filters.endDate]);
+  }, [autoRefresh, selectedRegion, filters.startDate, filters.endDate, token]);
 
   const loadData = async (date?: string) => {
+    if (!token) return;
     setLoading(true);
     try {
-      const data = await fetchNews(selectedRegion, date);
+      const data = await fetchNews(selectedRegion, date, token);
       setEntries(data);
       setLastUpdated(new Date());
     } catch (e) {
@@ -111,12 +152,20 @@ const App: React.FC = () => {
     setEntries(prev => prev.map(e => e.id === id ? { ...e, status: PostStatus.DISCARDED } : e));
   };
 
-  const runAnalysis = async () => {
-    setAnalyzing(true);
-    const result = await analyzeNewsBatch(filteredEntries);
-    setAnalysis(result);
-    setAnalyzing(false);
-  };
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <div className="bg-slate-900 p-8 rounded-lg shadow-xl border border-slate-800 text-center">
+          <div className="w-12 h-12 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-xl mx-auto mb-4">
+            NP
+          </div>
+          <h1 className="text-2xl font-bold text-white mb-2">NewsPulse</h1>
+          <p className="text-slate-400 mb-6">Please sign in to access the curator dashboard.</p>
+          <div id="google-signin-button" className="flex justify-center"></div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200 font-sans pb-20">
@@ -181,6 +230,12 @@ const App: React.FC = () => {
              <button onClick={() => loadData()} className="p-2 hover:bg-slate-800 rounded-full transition-colors text-slate-400 hover:text-white" title="Refresh now">
                <RefreshIcon />
              </button>
+             <button 
+               onClick={() => { setUser(null); setToken(null); }}
+               className="ml-2 px-3 py-1.5 text-xs font-medium bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white rounded-lg transition-colors"
+             >
+               Sign Out
+             </button>
           </div>
         </div>
       </header>
@@ -232,56 +287,7 @@ const App: React.FC = () => {
                 />
               </div>
             </div>
-
-            {/* AI Action */}
-            <button 
-              onClick={runAnalysis}
-              disabled={analyzing}
-              className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-sm font-medium rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-md shadow-blue-900/20"
-            >
-              {analyzing ? (
-                <>Analyzing...</>
-              ) : (
-                <>
-                  <SparklesIcon />
-                  Analyze View
-                </>
-              )}
-            </button>
           </div>
-
-          {/* Analysis Result Deck */}
-          {analysis && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 animate-fade-in">
-              <div className="bg-slate-900/50 border border-slate-800 p-5 rounded-xl">
-                <h3 className="text-slate-400 text-xs uppercase font-semibold tracking-wider mb-2">Narrative Summary</h3>
-                <p className="text-slate-200 text-sm leading-relaxed">{analysis.summary}</p>
-              </div>
-              <div className="bg-slate-900/50 border border-slate-800 p-5 rounded-xl">
-                <h3 className="text-slate-400 text-xs uppercase font-semibold tracking-wider mb-2">Sentiment Pulse</h3>
-                <div className="flex items-center gap-3 mt-3">
-                  <div className={`text-2xl font-bold ${analysis.sentiment === 'Positive' ? 'text-green-400' : analysis.sentiment === 'Negative' ? 'text-red-400' : 'text-yellow-400'}`}>
-                    {analysis.sentiment}
-                  </div>
-                  <div className="h-2 flex-1 bg-slate-800 rounded-full overflow-hidden">
-                    <div 
-                      className={`h-full rounded-full ${analysis.sentiment === 'Positive' ? 'bg-green-500 w-3/4' : analysis.sentiment === 'Negative' ? 'bg-red-500 w-3/4' : 'bg-yellow-500 w-1/2'}`}
-                    ></div>
-                  </div>
-                </div>
-              </div>
-              <div className="bg-slate-900/50 border border-slate-800 p-5 rounded-xl">
-                <h3 className="text-slate-400 text-xs uppercase font-semibold tracking-wider mb-2">Suggested Hashtags</h3>
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {analysis.trendingTags.map(tag => (
-                    <span key={tag} className="px-3 py-1 bg-blue-500/10 text-blue-400 text-xs rounded-full border border-blue-500/20">
-                      #{tag.replace('#', '')}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
         </div>
 
         {/* Content Grid */}

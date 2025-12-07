@@ -879,15 +879,24 @@ const MOCK_ARTICLES: ProcessedArticle[] = [
     }
 ];
 
-export const fetchNews = async (region: SourceRegion = 'eu', date?: string): Promise<NewsEntry[]> => {
+export const fetchNews = async (region: SourceRegion = 'eu', date?: string, token?: string): Promise<NewsEntry[]> => {
     try {
       let url = `/api/news?region=${region}`;
       if (date) {
         url += `&date=${date}`;
       }
       
-      const response = await fetch(url);
+      const headers: HeadersInit = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const response = await fetch(url, { headers });
       if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+           console.error("Authentication failed");
+           throw new Error("Authentication failed");
+        }
         // Return empty array instead of mock data to avoid showing wrong region data
         console.warn(`No data found for ${region}${date ? ` on ${date}` : ''}`);
         return [];
@@ -901,6 +910,6 @@ export const fetchNews = async (region: SourceRegion = 'eu', date?: string): Pro
       }));
     } catch (error) {
       console.error("Failed to fetch news:", error);
-      return [];
+      throw error; // Re-throw to handle in UI
     }
 };
