@@ -63,5 +63,5 @@ jobs:
           GOOGLE_CLOUD_PROJECT=${{ vars.GOOGLE_CLOUD_PROJECT }}
           GCS_BUCKET_NAME=${{ vars.GCS_BUCKET_NAME }}
           SCRAPING_REQUEST_TOPIC=${{ vars.SCRAPING_REQUEST_TOPIC }}
-          GOOGLE_CLIENT_ID=${{ vars.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_ID=${{ vars.VITE_GOOGLE_CLIENT_ID }}
         service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
