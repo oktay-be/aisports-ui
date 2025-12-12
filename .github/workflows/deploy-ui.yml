@@ -54,8 +54,6 @@ jobs:
         service: aisports-ui
         region: ${{ vars.REGION }}
         source: .
-        build_env_vars: |
-          GOOGLE_NODE_RUN_SCRIPTS=
         env_vars: |
           GOOGLE_CLOUD_PROJECT=${{ vars.GOOGLE_CLOUD_PROJECT }}
           GCS_BUCKET_NAME=${{ vars.GCS_BUCKET_NAME }}
@@ -68,3 +66,4 @@ jobs:
           --memory=512Mi
           --min-instances=0
           --max-instances=10
+          --build-env-vars=GOOGLE_NODE_RUN_SCRIPTS=
