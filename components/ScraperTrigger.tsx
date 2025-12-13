@@ -9,6 +9,14 @@ const PlayIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
 );
 
+const PlusIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+);
+
+const TrashIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+);
+
 interface RegionPanelProps {
   config: ScraperRegionConfig;
   region: 'eu' | 'tr';
@@ -20,6 +28,8 @@ interface RegionPanelProps {
   onToggleSource: (sourceId: string) => void;
   onUpdateKeywords: (value: string) => void;
   onUpdateScrapeDepth: (depth: number) => void;
+  onAddSource: (name: string, url: string) => void;
+  onDeleteSource: (sourceId: string) => void;
 }
 
 const RegionPanel: React.FC<RegionPanelProps> = ({
@@ -33,8 +43,22 @@ const RegionPanel: React.FC<RegionPanelProps> = ({
   onToggleSource,
   onUpdateKeywords,
   onUpdateScrapeDepth,
+  onAddSource,
+  onDeleteSource,
 }) => {
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newSourceName, setNewSourceName] = useState('');
+  const [newSourceUrl, setNewSourceUrl] = useState('');
   const enabledCount = config.sources.filter(s => s.enabled).length;
+
+  const handleAddSource = () => {
+    if (newSourceName.trim() && newSourceUrl.trim()) {
+      onAddSource(newSourceName.trim(), newSourceUrl.trim());
+      setNewSourceName('');
+      setNewSourceUrl('');
+      setShowAddForm(false);
+    }
+  };
 
   return (
     <div className="border border-slate-700 rounded-lg overflow-hidden bg-slate-900/50">
@@ -93,30 +117,105 @@ const RegionPanel: React.FC<RegionPanelProps> = ({
 
           {/* Sources */}
           <div>
-            <label className="block text-xs font-semibold text-slate-400 uppercase mb-2">
-              Sources
-            </label>
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-xs font-semibold text-slate-400 uppercase">
+                Sources
+              </label>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowAddForm(!showAddForm);
+                }}
+                className="flex items-center gap-1 px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded transition-colors"
+              >
+                <PlusIcon />
+                Add Source
+              </button>
+            </div>
+
+            {/* Add Source Form */}
+            {showAddForm && (
+              <div className="mb-3 p-3 bg-slate-800 rounded-lg border border-slate-700 space-y-2">
+                <input
+                  type="text"
+                  value={newSourceName}
+                  onChange={(e) => setNewSourceName(e.target.value)}
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => e.stopPropagation()}
+                  placeholder="Source name (e.g., ESPN)"
+                  className="w-full bg-slate-950 border border-slate-700 text-slate-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500"
+                />
+                <input
+                  type="text"
+                  value={newSourceUrl}
+                  onChange={(e) => setNewSourceUrl(e.target.value)}
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => e.stopPropagation()}
+                  placeholder="URL (e.g., https://www.espn.com/)"
+                  className="w-full bg-slate-950 border border-slate-700 text-slate-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500"
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleAddSource();
+                    }}
+                    disabled={!newSourceName.trim() || !newSourceUrl.trim()}
+                    className="flex-1 px-3 py-1.5 text-xs bg-green-600 hover:bg-green-500 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Add
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowAddForm(false);
+                      setNewSourceName('');
+                      setNewSourceUrl('');
+                    }}
+                    className="flex-1 px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
               {config.sources.map((source) => (
                 <div
                   key={source.id}
-                  className={`flex items-center gap-3 p-3 rounded-lg border transition-colors cursor-pointer ${
+                  className={`flex items-center gap-3 p-3 rounded-lg border transition-colors ${
                     source.enabled
                       ? 'bg-slate-800 border-slate-600 hover:border-slate-500'
                       : 'bg-slate-900/50 border-slate-800 opacity-50 hover:opacity-75'
                   }`}
-                  onClick={() => onToggleSource(source.id)}
                 >
                   <input
                     type="checkbox"
                     checked={source.enabled}
-                    onChange={() => {}}
-                    className="w-4 h-4 rounded accent-blue-600"
+                    onChange={() => onToggleSource(source.id)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-4 h-4 rounded accent-blue-600 cursor-pointer"
                   />
-                  <div className="flex-1 min-w-0">
+                  <div 
+                    className="flex-1 min-w-0 cursor-pointer"
+                    onClick={() => onToggleSource(source.id)}
+                  >
                     <p className="text-sm font-medium text-white truncate">{source.name}</p>
                     <p className="text-xs text-slate-500 truncate">{source.url}</p>
                   </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (confirm(`Delete "${source.name}"?`)) {
+                        onDeleteSource(source.id);
+                      }
+                    }}
+                    className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-900/20 rounded transition-colors"
+                    title="Delete source"
+                  >
+                    <TrashIcon />
+                  </button>
                 </div>
               ))}
             </div>
@@ -225,6 +324,25 @@ export const ScraperTrigger: React.FC = () => {
     setter({ ...config, scrapeDepth: depth });
   };
 
+  const addSource = (region: 'eu' | 'tr', name: string, url: string) => {
+    const setter = region === 'eu' ? setEuConfig : setTrConfig;
+    const config = region === 'eu' ? euConfig : trConfig;
+    const id = name.toLowerCase().replace(/[^a-z0-9]/g, '_') + '_' + Date.now();
+    setter({
+      ...config,
+      sources: [...config.sources, { id, name, url, enabled: true }],
+    });
+  };
+
+  const deleteSource = (region: 'eu' | 'tr', sourceId: string) => {
+    const setter = region === 'eu' ? setEuConfig : setTrConfig;
+    const config = region === 'eu' ? euConfig : trConfig;
+    setter({
+      ...config,
+      sources: config.sources.filter(s => s.id !== sourceId),
+    });
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between mb-4">
@@ -245,6 +363,8 @@ export const ScraperTrigger: React.FC = () => {
         onToggleSource={(sourceId) => toggleSource('eu', sourceId)}
         onUpdateKeywords={(value) => updateKeywords('eu', value)}
         onUpdateScrapeDepth={(depth) => updateScrapeDepth('eu', depth)}
+        onAddSource={(name, url) => addSource('eu', name, url)}
+        onDeleteSource={(sourceId) => deleteSource('eu', sourceId)}
       />
       <RegionPanel
         config={trConfig}
@@ -257,6 +377,8 @@ export const ScraperTrigger: React.FC = () => {
         onToggleSource={(sourceId) => toggleSource('tr', sourceId)}
         onUpdateKeywords={(value) => updateKeywords('tr', value)}
         onUpdateScrapeDepth={(depth) => updateScrapeDepth('tr', depth)}
+        onAddSource={(name, url) => addSource('tr', name, url)}
+        onDeleteSource={(sourceId) => deleteSource('tr', sourceId)}
       />
     </div>
   );
