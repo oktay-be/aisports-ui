@@ -49,6 +49,12 @@ export const DEFAULT_SCRAPER_CONFIG: Record<'eu' | 'tr', ScraperRegionConfig> = 
       { id: 'ntvspor', name: 'NTV Spor', url: 'https://www.ntvspor.net/', enabled: true },
       { id: 'skor', name: 'Skor Gazetesi', url: 'https://www.skorgazetesi.com', enabled: true },
       { id: 'beinsports', name: 'beIN SPORTS', url: 'https://beinsports.com.tr', enabled: true },
+      { id: 'htspor', name: 'HT Spor', url: 'https://www.htspor.com/', enabled: true },
+      { id: 'trtspor', name: 'TRT Spor', url: 'https://www.trtspor.com.tr/', enabled: true },
+      { id: 'sporx', name: 'Sporx', url: 'https://www.sporx.com/', enabled: true },
+      { id: 'ajansspor', name: 'Ajans Spor', url: 'https://ajansspor.com/', enabled: true },
+      { id: 'aspor', name: 'A Spor', url: 'https://www.aspor.com.tr/', enabled: true },
+      { id: 'fotospor', name: 'Fotospor', url: 'https://www.fotospor.com/', enabled: true },
     ],
   },
 };
