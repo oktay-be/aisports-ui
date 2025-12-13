@@ -53,15 +53,7 @@ jobs:
     - name: Deploy to Cloud Run
       uses: google-github-actions/deploy-cloudrun@v2
       with:
-        name: aisports-ui
-        runtime: nodejs20
-        memory: 512Mi
-        cpu: 1
-        service_timeout: 60
-        max_instance_count: 10
-        min_instance_count: 0
-        entry_point: app
-        source_dir: .
+        service: aisports-ui
         region: ${{ vars.REGION }}
         source: .
         env_vars: |
@@ -74,6 +66,8 @@ jobs:
           --allow-unauthenticated
           --service-account=${{ vars.GCP_SERVICE_ACCOUNT }}
           --memory=512Mi
+          --cpu=1
+          --timeout=60
           --min-instances=0
           --max-instances=10
           --set-build-env-vars=GOOGLE_NODE_RUN_SCRIPTS=
