@@ -28,6 +28,9 @@ const TwitterIcon = () => (
 const TranslateIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></svg>
 );
+const SettingsIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+);
 
 const App: React.FC = () => {
   const [user, setUser] = useState<any>(null);
@@ -38,13 +41,54 @@ const App: React.FC = () => {
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [activeTab, setActiveTab] = useState<'feed' | 'scraper'>('feed');
+  const [showTagSettings, setShowTagSettings] = useState(false);
+  const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
+
+  // Get today's date in YYYY-MM-DD format
+  const getTodayDate = () => new Date().toISOString().split('T')[0];
 
   const [filters, setFilters] = useState<FilterState>({
     search: '',
-    startDate: '',
-    endDate: '',
+    startDate: getTodayDate(),
+    endDate: getTodayDate(),
     status: 'ALL'
   });
+
+  const setToday = () => {
+    const today = getTodayDate();
+    setFilters(prev => ({ ...prev, startDate: today, endDate: today }));
+  };
+
+  // Compute all unique tags from entries
+  const allTags = useMemo(() => {
+    const tags = new Set<string>();
+    entries.forEach(entry => {
+      entry.categories?.forEach(cat => tags.add(cat));
+    });
+    return Array.from(tags).sort();
+  }, [entries]);
+
+  // Update selectedTags when entries change (select all by default)
+  useEffect(() => {
+    if (allTags.length > 0) {
+      setSelectedTags(new Set(allTags));
+    }
+  }, [allTags.join(',')]);
+
+  const toggleTag = (tag: string) => {
+    setSelectedTags(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(tag)) {
+        newSet.delete(tag);
+      } else {
+        newSet.add(tag);
+      }
+      return newSet;
+    });
+  };
+
+  const selectAllTags = () => setSelectedTags(new Set(allTags));
+  const clearAllTags = () => setSelectedTags(new Set());
 
   // Google Sign-In Initialization
   useEffect(() => {
@@ -135,13 +179,17 @@ const App: React.FC = () => {
       
       const matchesStatus = filters.status === 'ALL' ? true : entry.status === filters.status;
       
+      // Tag filtering: entry must have at least one category that is selected
+      const matchesTags = selectedTags.size === 0 || 
+                          entry.categories?.some(cat => selectedTags.has(cat));
+      
       // Note: Date filtering is handled by the API (based on scraping date),
       // not here (which would filter by article published_date).
       // Articles scraped on 2025-12-05 might have been published days earlier.
 
-      return matchesSearch && matchesStatus;
+      return matchesSearch && matchesStatus && matchesTags;
     });
-  }, [entries, filters]);
+  }, [entries, filters, selectedTags]);
 
   // Actions
   const handlePost = (id: string) => {
@@ -286,6 +334,12 @@ const App: React.FC = () => {
                   onChange={(e) => setFilters({...filters, endDate: e.target.value})}
                 />
               </div>
+              <button
+                onClick={setToday}
+                className="px-3 py-2 text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition-colors border border-slate-700"
+              >
+                Today
+              </button>
             </div>
           </div>
         </div>
@@ -296,10 +350,66 @@ const App: React.FC = () => {
         ) : (
           <>
              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold text-white">
-                  Feed <span className="ml-2 px-2 py-0.5 bg-slate-800 text-slate-400 text-xs rounded-full">{filteredEntries.length}</span>
-                </h2>
+                <div className="flex items-center gap-3">
+                  <h2 className="text-lg font-semibold text-white">
+                    Feed <span className="ml-2 px-2 py-0.5 bg-slate-800 text-slate-400 text-xs rounded-full">{filteredEntries.length}</span>
+                  </h2>
+                  <button
+                    onClick={() => setShowTagSettings(!showTagSettings)}
+                    className={`p-2 rounded-lg transition-colors border ${
+                      showTagSettings 
+                        ? 'bg-blue-600 text-white border-blue-500' 
+                        : 'bg-slate-800 text-slate-400 hover:text-white border-slate-700 hover:border-slate-600'
+                    }`}
+                    title="Filter by tags"
+                  >
+                    <SettingsIcon />
+                  </button>
+                </div>
              </div>
+
+             {/* Tag Filter Panel */}
+             {showTagSettings && (
+               <div className="mb-6 p-4 bg-slate-900 rounded-xl border border-slate-800 animate-fade-in">
+                 <div className="flex items-center justify-between mb-3">
+                   <h3 className="text-sm font-semibold text-slate-300">Filter by Tags</h3>
+                   <div className="flex gap-2">
+                     <button
+                       onClick={selectAllTags}
+                       className="text-xs px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded transition-colors"
+                     >
+                       Select All
+                     </button>
+                     <button
+                       onClick={clearAllTags}
+                       className="text-xs px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded transition-colors"
+                     >
+                       Clear All
+                     </button>
+                   </div>
+                 </div>
+                 <div className="flex flex-wrap gap-2">
+                   {allTags.map(tag => (
+                     <label
+                       key={tag}
+                       className={`flex items-center gap-2 px-3 py-1.5 rounded-lg cursor-pointer transition-colors border ${
+                         selectedTags.has(tag)
+                           ? 'bg-blue-600/20 border-blue-500 text-blue-300'
+                           : 'bg-slate-800 border-slate-700 text-slate-500 hover:text-slate-300'
+                       }`}
+                     >
+                       <input
+                         type="checkbox"
+                         checked={selectedTags.has(tag)}
+                         onChange={() => toggleTag(tag)}
+                         className="sr-only"
+                       />
+                       <span className="text-xs font-medium">{tag.replace(/_/g, ' ')}</span>
+                     </label>
+                   ))}
+                 </div>
+               </div>
+             )}
 
              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
               {filteredEntries.map(entry => (
