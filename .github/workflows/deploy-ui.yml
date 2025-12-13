@@ -1,12 +1,15 @@
-name: Deploy UI Function
+name: Deploy UI to Cloud Run
 
 on:
   push:
     branches:
       - main
     paths:
-      - 'src/**'
-      - 'public/**'
+      - '**/*.tsx'
+      - '**/*.ts'
+      - '**/*.js'
+      - 'components/**'
+      - 'services/**'
       - 'package.json'
       - 'vite.config.ts'
       - 'server.js'
@@ -35,8 +38,10 @@ jobs:
     - name: Install Dependencies
       run: npm install
 
-    - name: Build Application
+    - name: Build React Application
       run: npm run build
+      env:
+        VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
 
     - name: Authenticate to Google Cloud (Workload Identity Federation)
       uses: google-github-actions/auth@v2
@@ -45,8 +50,8 @@ jobs:
         service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
         export_environment_variables: true
 
-    - name: Deploy Cloud Function
-      uses: google-github-actions/deploy-cloud-functions@v3
+    - name: Deploy to Cloud Run
+      uses: google-github-actions/deploy-cloudrun@v2
       with:
         name: aisports-ui
         runtime: nodejs20
@@ -58,9 +63,17 @@ jobs:
         entry_point: app
         source_dir: .
         region: ${{ vars.REGION }}
-        environment_variables: |
+        source: .
+        env_vars: |
           GOOGLE_CLOUD_PROJECT=${{ vars.GOOGLE_CLOUD_PROJECT }}
           GCS_BUCKET_NAME=${{ vars.GCS_BUCKET_NAME }}
           SCRAPING_REQUEST_TOPIC=${{ vars.SCRAPING_REQUEST_TOPIC }}
           GOOGLE_CLIENT_ID=${{ vars.VITE_GOOGLE_CLIENT_ID }}
-        service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+          NODE_ENV=production
+        flags: |
+          --allow-unauthenticated
+          --service-account=${{ vars.GCP_SERVICE_ACCOUNT }}
+          --memory=512Mi
+          --min-instances=0
+          --max-instances=10
+          --set-build-env-vars=GOOGLE_NODE_RUN_SCRIPTS=

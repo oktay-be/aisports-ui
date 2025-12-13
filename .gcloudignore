@@ -1,13 +1,30 @@
+# Ignore source files (only deploy built artifacts)
 node_modules/
 .git/
 .github/
 .env
+*.md
+LICENSE
+
+# Source files (not needed after build)
 src/
+components/
+services/
 public/
+*.tsx
+*.ts
+!server.js
 vite.config.ts
 tsconfig.json
-README.md
+
+# Keep only what's needed for production
 !dist/
 !server.js
 !package.json
 !package-lock.json
+!app.yaml
+
+# Ignore test files and logs
+logs_*
+*.log
+*.jsonl
