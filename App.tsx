@@ -403,6 +403,17 @@ const NewsCard: React.FC<{
             }`}>
               {entry.content_quality.toUpperCase()}
             </span>
+            {entry.article_id && (
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(entry.article_id!);
+                }}
+                className="text-[10px] px-1.5 py-0.5 rounded border border-slate-700 text-slate-400 bg-slate-800/50 hover:bg-slate-700 hover:text-slate-300 transition-colors cursor-pointer"
+                title={`Copy ID: ${entry.article_id}`}
+              >
+                ID
+              </button>
+            )}
           </div>
           <a 
             href={entry.original_url} 

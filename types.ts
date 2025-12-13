@@ -14,6 +14,7 @@ export interface KeyEntities {
 }
 
 export interface ProcessedArticle {
+  article_id?: string;
   original_url: string;
   title: string;
   summary: string;
