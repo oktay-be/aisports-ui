@@ -390,22 +390,17 @@ const App: React.FC = () => {
                  </div>
                  <div className="flex flex-wrap gap-2">
                    {allTags.map(tag => (
-                     <label
+                     <div
                        key={tag}
+                       onClick={() => toggleTag(tag)}
                        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg cursor-pointer transition-colors border ${
                          selectedTags.has(tag)
                            ? 'bg-blue-600/20 border-blue-500 text-blue-300'
                            : 'bg-slate-800 border-slate-700 text-slate-500 hover:text-slate-300'
                        }`}
                      >
-                       <input
-                         type="checkbox"
-                         checked={selectedTags.has(tag)}
-                         onChange={() => toggleTag(tag)}
-                         className="sr-only"
-                       />
                        <span className="text-xs font-medium">{tag.replace(/_/g, ' ')}</span>
-                     </label>
+                     </div>
                    ))}
                  </div>
                </div>
