@@ -37,7 +37,7 @@ const App: React.FC = () => {
   const [token, setToken] = useState<string | null>(null);
   const [entries, setEntries] = useState<NewsEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedRegion, setSelectedRegion] = useState<SourceRegion>('eu');
+  const [selectedRegion, setSelectedRegion] = useState<SourceRegion>('tr');
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [activeTab, setActiveTab] = useState<'feed' | 'scraper'>('feed');
