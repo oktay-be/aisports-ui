@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { NewsEntry, PostStatus, FilterState, GeminiAnalysis, SourceRegion } from './types';
 import { fetchNews } from './services/dataService';
 import { ScraperTrigger } from './components/ScraperTrigger';
+import { loadPreferences, savePreferences, UserPreferences, DEFAULT_PREFERENCES } from './services/userPreferencesService';
 
 // --- Icons ---
 const RefreshIcon = () => (
@@ -31,6 +32,9 @@ const TranslateIcon = () => (
 const SettingsIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
 );
+const ChevronDownIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+);
 
 const App: React.FC = () => {
   const [user, setUser] = useState<any>(null);
@@ -43,6 +47,13 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'feed' | 'scraper'>('feed');
   const [showTagSettings, setShowTagSettings] = useState(false);
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
+  
+  // Multi-user state
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [feedFilter, setFeedFilter] = useState<'my' | 'all' | string>('my');
+  const [allowedUsers, setAllowedUsers] = useState<string[]>([]);
+  const [preferences, setPreferences] = useState<UserPreferences>(DEFAULT_PREFERENCES);
+  const [showUserMenu, setShowUserMenu] = useState(false);
 
   // Get today's date in YYYY-MM-DD format
   const getTodayDate = () => new Date().toISOString().split('T')[0];
@@ -90,6 +101,17 @@ const App: React.FC = () => {
   const selectAllTags = () => setSelectedTags(new Set(allTags));
   const clearAllTags = () => setSelectedTags(new Set());
 
+  // Close user menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (showUserMenu && !(e.target as Element).closest('.user-menu-container')) {
+        setShowUserMenu(false);
+      }
+    };
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, [showUserMenu]);
+
   // Google Sign-In Initialization
   useEffect(() => {
     const initializeGoogleSignIn = () => {
@@ -129,6 +151,51 @@ const App: React.FC = () => {
     }
   }, [user]);
 
+  // Load user info (admin status, allowed users) and preferences when authenticated
+  useEffect(() => {
+    if (!token) return;
+
+    const loadUserInfo = async () => {
+      try {
+        // Load user info including admin status
+        const userResponse = await fetch('/api/user', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (userResponse.ok) {
+          const userData = await userResponse.json();
+          setIsAdmin(userData.isAdmin);
+        }
+
+        // If admin, load allowed users list for feed filter
+        const adminResponse = await fetch('/api/config/admin-users', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (adminResponse.ok) {
+          const adminData = await adminResponse.json();
+          // Load allowed users list
+          const allowedResponse = await fetch('/api/config/allowed-users', {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (allowedResponse.ok) {
+            const allowedData = await allowedResponse.json();
+            setAllowedUsers(allowedData.users || []);
+          }
+        }
+
+        // Load user preferences
+        const prefs = await loadPreferences(token);
+        setPreferences(prefs);
+        if (prefs.feedFilter) {
+          setFeedFilter(prefs.feedFilter);
+        }
+      } catch (error) {
+        console.error('Error loading user info:', error);
+      }
+    };
+
+    loadUserInfo();
+  }, [token]);
+
   // Initial Fetch & Date Filter Watch - fetch whenever dates or region change
   useEffect(() => {
     if (!token) return; // Only fetch if authenticated
@@ -156,17 +223,41 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [autoRefresh, selectedRegion, filters.startDate, filters.endDate, token]);
 
+  // Reload data when feedFilter changes
+  useEffect(() => {
+    if (!token) return;
+    loadData(filters.startDate === filters.endDate ? filters.startDate : undefined);
+  }, [feedFilter]);
+
   const loadData = async (date?: string) => {
     if (!token) return;
     setLoading(true);
     try {
-      const data = await fetchNews(selectedRegion, date, token);
+      // Determine triggered_by filter based on feedFilter
+      let triggeredBy: string | undefined;
+      if (feedFilter === 'my') {
+        triggeredBy = user?.email;
+      } else if (feedFilter === 'all') {
+        triggeredBy = undefined; // No filter - show all
+      } else {
+        triggeredBy = feedFilter; // Specific user email
+      }
+      
+      const data = await fetchNews(selectedRegion, date, token, triggeredBy);
       setEntries(data);
       setLastUpdated(new Date());
     } catch (e) {
       console.error(e);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Handle feed filter change and save to preferences
+  const handleFeedFilterChange = async (newFilter: 'my' | 'all' | string) => {
+    setFeedFilter(newFilter);
+    if (token) {
+      await savePreferences(token, { ...preferences, feedFilter: newFilter });
     }
   };
 
@@ -278,12 +369,89 @@ const App: React.FC = () => {
              <button onClick={() => loadData()} className="p-2 hover:bg-slate-800 rounded-full transition-colors text-slate-400 hover:text-white" title="Refresh now">
                <RefreshIcon />
              </button>
-             <button 
-               onClick={() => { setUser(null); setToken(null); }}
-               className="ml-2 px-3 py-1.5 text-xs font-medium bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white rounded-lg transition-colors"
-             >
-               Sign Out
-             </button>
+             
+             {/* Feed Filter Dropdown (Admin only sees all options) */}
+             <div className="relative user-menu-container">
+               <button 
+                 onClick={() => setShowUserMenu(!showUserMenu)}
+                 className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors"
+               >
+                 {user?.picture ? (
+                   <img src={user.picture} alt="" className="w-6 h-6 rounded-full" />
+                 ) : (
+                   <div className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center text-xs font-bold text-white">
+                     {user?.name?.charAt(0) || '?'}
+                   </div>
+                 )}
+                 <span className="text-sm text-slate-300 hidden md:inline max-w-[120px] truncate">
+                   {user?.name || user?.email}
+                 </span>
+                 <ChevronDownIcon />
+               </button>
+               
+               {showUserMenu && (
+                 <div className="absolute right-0 mt-2 w-64 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-50">
+                   <div className="p-3 border-b border-slate-700">
+                     <p className="text-sm font-medium text-white truncate">{user?.name}</p>
+                     <p className="text-xs text-slate-400 truncate">{user?.email}</p>
+                     {isAdmin && (
+                       <span className="inline-block mt-1 px-2 py-0.5 text-[10px] font-bold bg-amber-600/20 text-amber-400 rounded">
+                         ADMIN
+                       </span>
+                     )}
+                   </div>
+                   
+                   <div className="p-2 border-b border-slate-700">
+                     <p className="px-2 py-1 text-xs font-medium text-slate-500 uppercase">Feed Filter</p>
+                     <button
+                       onClick={() => { handleFeedFilterChange('my'); setShowUserMenu(false); }}
+                       className={`w-full text-left px-3 py-2 text-sm rounded-md transition-colors ${
+                         feedFilter === 'my' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-700'
+                       }`}
+                     >
+                       My Feeds
+                     </button>
+                     {isAdmin && (
+                       <>
+                         <button
+                           onClick={() => { handleFeedFilterChange('all'); setShowUserMenu(false); }}
+                           className={`w-full text-left px-3 py-2 text-sm rounded-md transition-colors ${
+                             feedFilter === 'all' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-700'
+                           }`}
+                         >
+                           All Feeds
+                         </button>
+                         {allowedUsers.filter(email => email !== user?.email).length > 0 && (
+                           <div className="mt-1 pt-1 border-t border-slate-700">
+                             <p className="px-3 py-1 text-xs text-slate-500">Other Users</p>
+                             {allowedUsers.filter(email => email !== user?.email).map(email => (
+                               <button
+                                 key={email}
+                                 onClick={() => { handleFeedFilterChange(email); setShowUserMenu(false); }}
+                                 className={`w-full text-left px-3 py-2 text-sm rounded-md transition-colors truncate ${
+                                   feedFilter === email ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-700'
+                                 }`}
+                               >
+                                 {email}
+                               </button>
+                             ))}
+                           </div>
+                         )}
+                       </>
+                     )}
+                   </div>
+                   
+                   <div className="p-2">
+                     <button 
+                       onClick={() => { setUser(null); setToken(null); setShowUserMenu(false); }}
+                       className="w-full text-left px-3 py-2 text-sm text-red-400 hover:bg-slate-700 rounded-md transition-colors"
+                     >
+                       Sign Out
+                     </button>
+                   </div>
+                 </div>
+               )}
+             </div>
           </div>
         </div>
       </header>
@@ -291,7 +459,7 @@ const App: React.FC = () => {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         
         {activeTab === 'scraper' ? (
-          <ScraperTrigger />
+          <ScraperTrigger token={token || undefined} />
         ) : (
           <>
         {/* Controls & Analysis Bar */}

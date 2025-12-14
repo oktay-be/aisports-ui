@@ -879,11 +879,14 @@ const MOCK_ARTICLES: ProcessedArticle[] = [
     }
 ];
 
-export const fetchNews = async (region: SourceRegion = 'eu', date?: string, token?: string): Promise<NewsEntry[]> => {
+export const fetchNews = async (region: SourceRegion = 'eu', date?: string, token?: string, triggeredBy?: string): Promise<NewsEntry[]> => {
     try {
       let url = `/api/news?region=${region}`;
       if (date) {
         url += `&date=${date}`;
+      }
+      if (triggeredBy) {
+        url += `&triggered_by=${encodeURIComponent(triggeredBy)}`;
       }
       
       const headers: HeadersInit = {};

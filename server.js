@@ -2,6 +2,7 @@ import express from 'express';
 import { Storage } from '@google-cloud/storage';
 import { PubSub } from '@google-cloud/pubsub';
 import { OAuth2Client } from 'google-auth-library';
+import crypto from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -17,16 +18,82 @@ const BUCKET_NAME = process.env.GCS_BUCKET_NAME;
 const SCRAPING_TOPIC = process.env.SCRAPING_REQUEST_TOPIC || 'scraping-requests';
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID; 
 
-// HARDCODED ALLOWED EMAILS
-const ALLOWED_EMAILS = [
+// GCS Config paths
+const CONFIG_FOLDER = 'config/';
+const USER_PREFERENCES_FOLDER = 'user_preferences/';
+
+// Fallback allowed emails (used if GCS config not available)
+const FALLBACK_ALLOWED_EMAILS = [
   'oktay.burak.ertas@gmail.com', 
-  // Add other emails here
 ];
 
 // Initialize Clients
 const storage = new Storage({ projectId: PROJECT_ID });
 const pubsub = new PubSub({ projectId: PROJECT_ID });
 const authClient = new OAuth2Client(GOOGLE_CLIENT_ID);
+
+// --- HELPER FUNCTIONS ---
+
+/**
+ * Generate a hash of the email for folder naming
+ */
+const hashEmail = (email) => {
+  return crypto.createHash('sha256').update(email.toLowerCase()).digest('hex').slice(0, 16);
+};
+
+/**
+ * Load allowed users from GCS config
+ */
+const loadAllowedUsers = async () => {
+  try {
+    const bucket = storage.bucket(BUCKET_NAME);
+    const file = bucket.file(`${CONFIG_FOLDER}allowed_users.json`);
+    const [exists] = await file.exists();
+    
+    if (!exists) {
+      console.warn('allowed_users.json not found in GCS, using fallback list');
+      return FALLBACK_ALLOWED_EMAILS;
+    }
+    
+    const [content] = await file.download();
+    const config = JSON.parse(content.toString());
+    return config.allowed_users || FALLBACK_ALLOWED_EMAILS;
+  } catch (error) {
+    console.error('Error loading allowed users from GCS:', error);
+    return FALLBACK_ALLOWED_EMAILS;
+  }
+};
+
+/**
+ * Load admin users from GCS config
+ */
+const loadAdminUsers = async () => {
+  try {
+    const bucket = storage.bucket(BUCKET_NAME);
+    const file = bucket.file(`${CONFIG_FOLDER}admin_users.json`);
+    const [exists] = await file.exists();
+    
+    if (!exists) {
+      console.warn('admin_users.json not found in GCS');
+      return [];
+    }
+    
+    const [content] = await file.download();
+    const config = JSON.parse(content.toString());
+    return config.admin_users || [];
+  } catch (error) {
+    console.error('Error loading admin users from GCS:', error);
+    return [];
+  }
+};
+
+/**
+ * Check if a user is an admin
+ */
+const isAdmin = async (email) => {
+  const adminUsers = await loadAdminUsers();
+  return adminUsers.includes(email);
+};
 
 app.use(express.json());
 
@@ -39,9 +106,6 @@ const requireAuth = async (req, res, next) => {
 
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    // For now, if no token is present, we might want to return 401.
-    // But if the user hasn't implemented frontend auth yet, this will block everything.
-    // I will enforce it as requested.
     return res.status(401).json({ error: 'Missing or invalid Authorization header' });
   }
 
@@ -55,8 +119,13 @@ const requireAuth = async (req, res, next) => {
     const payload = ticket.getPayload();
     const email = payload['email'];
 
-    if (ALLOWED_EMAILS.includes(email)) {
+    // Load allowed users from GCS
+    const allowedEmails = await loadAllowedUsers();
+    
+    if (allowedEmails.includes(email)) {
+      // Check if user is admin
       req.user = payload;
+      req.user.isAdmin = await isAdmin(email);
       next();
     } else {
       console.warn(`Access denied for email: ${email}`);
@@ -73,6 +142,112 @@ app.use('/api', requireAuth);
 
 // --- API ROUTES ---
 
+// GET /api/user - Get current user info
+app.get('/api/user', async (req, res) => {
+  res.json({
+    email: req.user.email,
+    name: req.user.name,
+    picture: req.user.picture,
+    isAdmin: req.user.isAdmin
+  });
+});
+
+// GET /api/user/preferences - Get user preferences from GCS
+app.get('/api/user/preferences', async (req, res) => {
+  try {
+    const emailHash = hashEmail(req.user.email);
+    const bucket = storage.bucket(BUCKET_NAME);
+    const file = bucket.file(`${USER_PREFERENCES_FOLDER}${emailHash}/preferences.json`);
+    
+    const [exists] = await file.exists();
+    if (!exists) {
+      // Return default preferences for new users
+      return res.json({
+        email: req.user.email,
+        scraperConfig: null,
+        feedSettings: {
+          defaultRegion: 'tr',
+          autoRefresh: false
+        },
+        createdAt: null,
+        lastUpdated: null
+      });
+    }
+    
+    const [content] = await file.download();
+    const preferences = JSON.parse(content.toString());
+    res.json(preferences);
+  } catch (error) {
+    console.error('Error loading user preferences:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PUT /api/user/preferences - Save user preferences to GCS
+app.put('/api/user/preferences', async (req, res) => {
+  try {
+    const emailHash = hashEmail(req.user.email);
+    const bucket = storage.bucket(BUCKET_NAME);
+    const file = bucket.file(`${USER_PREFERENCES_FOLDER}${emailHash}/preferences.json`);
+    
+    // Check if preferences already exist to preserve createdAt
+    let existingPrefs = {};
+    const [exists] = await file.exists();
+    if (exists) {
+      const [content] = await file.download();
+      existingPrefs = JSON.parse(content.toString());
+    }
+    
+    const preferences = {
+      email: req.user.email,
+      scraperConfig: req.body.scraperConfig || existingPrefs.scraperConfig,
+      feedSettings: req.body.feedSettings || existingPrefs.feedSettings,
+      createdAt: existingPrefs.createdAt || new Date().toISOString(),
+      lastUpdated: new Date().toISOString()
+    };
+    
+    await file.save(JSON.stringify(preferences, null, 2), {
+      contentType: 'application/json'
+    });
+    
+    console.log(`Saved preferences for ${req.user.email} to ${USER_PREFERENCES_FOLDER}${emailHash}/preferences.json`);
+    res.json(preferences);
+  } catch (error) {
+    console.error('Error saving user preferences:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/config/allowed-users - Get allowed users (admin only)
+app.get('/api/config/allowed-users', async (req, res) => {
+  if (!req.user.isAdmin) {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+  
+  try {
+    const allowedUsers = await loadAllowedUsers();
+    res.json({ allowed_users: allowedUsers });
+  } catch (error) {
+    console.error('Error loading allowed users:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/config/admin-users - Get admin users (admin only)
+app.get('/api/config/admin-users', async (req, res) => {
+  if (!req.user.isAdmin) {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+  
+  try {
+    const adminUsers = await loadAdminUsers();
+    res.json({ admin_users: adminUsers });
+  } catch (error) {
+    console.error('Error loading admin users:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // GET /api/news
 app.get('/api/news', async (req, res) => {
   if (!BUCKET_NAME) {
@@ -84,6 +259,7 @@ app.get('/api/news', async (req, res) => {
     const dateParam = req.query.date; // YYYY-MM-DD
     const latestOnly = req.query.latest === 'true';
     const lastNDays = parseInt(req.query.last_n_days || '0');
+    const triggeredByFilter = req.query.triggered_by; // 'me', 'all', or specific email
 
     let prefix = `news_data/batch_processing/${region}/`;
 
@@ -122,6 +298,53 @@ app.get('/api/news', async (req, res) => {
         }
         return false;
       });
+    }
+
+    // Apply triggered_by filter if specified
+    if (triggeredByFilter && triggeredByFilter !== 'all') {
+      const targetEmail = triggeredByFilter === 'me' ? req.user.email : triggeredByFilter;
+      
+      // Non-admins can only filter by 'me'
+      if (triggeredByFilter !== 'me' && !req.user.isAdmin) {
+        return res.status(403).json({ error: 'Admin access required to view other users\' feeds' });
+      }
+      
+      // Filter result files by checking metadata.json in the same run folder
+      const filteredFiles = [];
+      for (const file of resultFiles) {
+        try {
+          // Extract run folder path from predictions file path
+          // Example: news_data/batch_processing/tr/2025-12/2025-12-13/run_21-51-39/stage2_deduplication/results/...predictions.jsonl
+          const runFolderMatch = file.name.match(/(news_data\/batch_processing\/[^/]+\/\d{4}-\d{2}\/\d{4}-\d{2}-\d{2}\/run_[^/]+)\//);
+          if (runFolderMatch) {
+            const metadataPath = `${runFolderMatch[1]}/metadata.json`;
+            const metadataFile = storage.bucket(BUCKET_NAME).file(metadataPath);
+            const [metadataExists] = await metadataFile.exists();
+            
+            if (metadataExists) {
+              const [metadataContent] = await metadataFile.download();
+              const metadata = JSON.parse(metadataContent.toString());
+              const triggeredBy = metadata.triggered_by || 'system';
+              
+              if (triggeredBy === targetEmail) {
+                filteredFiles.push(file);
+              }
+            } else {
+              // No metadata = system triggered (historical data)
+              if (targetEmail === 'system') {
+                filteredFiles.push(file);
+              }
+            }
+          }
+        } catch (err) {
+          console.warn(`Error checking metadata for ${file.name}:`, err.message);
+          // Include file if we can't determine ownership (backward compatibility)
+          if (triggeredByFilter === 'all' || !triggeredByFilter) {
+            filteredFiles.push(file);
+          }
+        }
+      }
+      resultFiles = filteredFiles;
     }
 
     if (resultFiles.length === 0) {
@@ -181,8 +404,11 @@ app.post('/api/trigger-scraper', async (req, res) => {
   }
 
   try {
-    const payload = req.body;
-    console.log(`Triggering scraper for ${payload.collection_id}:`, payload);
+    const payload = {
+      ...req.body,
+      triggered_by: req.user.email  // Add user email to track who triggered the scrape
+    };
+    console.log(`Triggering scraper for ${payload.collection_id} by ${req.user.email}:`, payload);
 
     const topicPath = pubsub.topic(SCRAPING_TOPIC);
     const dataBuffer = Buffer.from(JSON.stringify(payload));
@@ -193,7 +419,8 @@ app.post('/api/trigger-scraper', async (req, res) => {
       success: true, 
       messageId,
       region: payload.collection_id,
-      sourcesCount: payload.urls ? payload.urls.length : 0
+      sourcesCount: payload.urls ? payload.urls.length : 0,
+      triggeredBy: req.user.email
     });
   } catch (error) {
     console.error('Scraper trigger error:', error);

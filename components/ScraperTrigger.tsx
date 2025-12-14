@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { DEFAULT_SCRAPER_CONFIG, ScraperRegionConfig } from '../scraper-config';
+import { loadPreferences, savePreferences, UserPreferences } from '../services/userPreferencesService';
 
 const ChevronDownIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
@@ -242,13 +243,32 @@ const RegionPanel: React.FC<RegionPanelProps> = ({
   );
 };
 
-export const ScraperTrigger: React.FC = () => {
+export const ScraperTrigger: React.FC<{ token?: string }> = ({ token }) => {
   const [euConfig, setEuConfig] = useState(DEFAULT_SCRAPER_CONFIG.eu);
   const [trConfig, setTrConfig] = useState(DEFAULT_SCRAPER_CONFIG.tr);
   const [expandedRegion, setExpandedRegion] = useState<'eu' | 'tr' | null>(null);
   const [triggering, setTriggering] = useState<'eu' | 'tr' | null>(null);
   const [euKeywordsInput, setEuKeywordsInput] = useState(DEFAULT_SCRAPER_CONFIG.eu.keywords.join(', '));
   const [trKeywordsInput, setTrKeywordsInput] = useState(DEFAULT_SCRAPER_CONFIG.tr.keywords.join(', '));
+  const [preferencesLoaded, setPreferencesLoaded] = useState(false);
+
+  // Load user preferences on mount
+  useEffect(() => {
+    if (!token) return;
+    
+    const loadUserPreferences = async () => {
+      const prefs = await loadPreferences(token);
+      if (prefs.lastScraperConfig) {
+        // Apply saved preferences if available
+        // Note: For now we just mark as loaded. 
+        // Full config restoration could be added later.
+        console.log('User preferences loaded:', prefs);
+      }
+      setPreferencesLoaded(true);
+    };
+    
+    loadUserPreferences();
+  }, [token]);
 
   const handleTrigger = async (region: 'eu' | 'tr') => {
     setTriggering(region);
@@ -266,10 +286,16 @@ export const ScraperTrigger: React.FC = () => {
     };
 
     try {
+      // Build headers with auth token
+      const headers: HeadersInit = { 'Content-Type': 'application/json' };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
       // Call the API endpoint to trigger Cloud Function via Pub/Sub
       const response = await fetch('/api/trigger-scraper', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(payload),
       });
 
