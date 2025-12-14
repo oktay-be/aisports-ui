@@ -221,7 +221,24 @@ const gcsProxyPlugin = () => {
           try {
             const payload = JSON.parse(body);
             
-            console.log(`Triggering scraper for ${payload.collection_id}:`, payload);
+            // Extract user email from Authorization header (JWT token)
+            const authHeader = req.headers.authorization;
+            let triggeredBy = 'system';
+            if (authHeader && authHeader.startsWith('Bearer ')) {
+              try {
+                const token = authHeader.split(' ')[1];
+                const payloadBase64 = token.split('.')[1];
+                const decodedPayload = JSON.parse(Buffer.from(payloadBase64, 'base64').toString());
+                triggeredBy = decodedPayload.email || 'system';
+              } catch (e) {
+                console.warn('Could not extract email from token');
+              }
+            }
+            
+            // Add triggered_by to payload
+            payload.triggered_by = triggeredBy;
+            
+            console.log(`Triggering scraper for ${payload.collection_id} by ${triggeredBy}:`, payload);
             
             // Publish to Pub/Sub topic
             const topicPath = pubsub.topic(scrapingTopic);
@@ -236,7 +253,8 @@ const gcsProxyPlugin = () => {
               success: true, 
               messageId,
               region: payload.collection_id,
-              sourcesCount: payload.urls.length 
+              sourcesCount: payload.urls.length,
+              triggeredBy
             }));
           } catch (error: any) {
             console.error('Scraper trigger error:', error);
@@ -244,6 +262,125 @@ const gcsProxyPlugin = () => {
             res.end(JSON.stringify({ error: error.message }));
           }
         });
+      });
+
+      // GET /api/user - Get current user info from JWT token
+      server.middlewares.use('/api/user', async (req, res, next) => {
+        if (req.method !== 'GET') {
+          return next();
+        }
+
+        try {
+          const authHeader = req.headers.authorization;
+          if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            res.statusCode = 401;
+            res.end(JSON.stringify({ error: 'Missing authorization' }));
+            return;
+          }
+
+          // Decode JWT token (already verified by Google on client side)
+          const token = authHeader.split(' ')[1];
+          const payloadBase64 = token.split('.')[1];
+          const decodedPayload = JSON.parse(Buffer.from(payloadBase64, 'base64').toString());
+          
+          const email = decodedPayload.email;
+          
+          // Check if user is admin
+          let isAdmin = false;
+          if (storage && bucketName) {
+            try {
+              const adminFile = storage.bucket(bucketName).file('config/admin_users.json');
+              const [exists] = await adminFile.exists();
+              if (exists) {
+                const [content] = await adminFile.download();
+                const adminConfig = JSON.parse(content.toString());
+                isAdmin = (adminConfig.admin_users || []).includes(email);
+              }
+            } catch (e) {
+              console.warn('Could not load admin users:', e);
+            }
+          }
+
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({
+            email: email,
+            name: decodedPayload.name,
+            picture: decodedPayload.picture,
+            isAdmin: isAdmin
+          }));
+        } catch (error: any) {
+          console.error('User endpoint error:', error);
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: error.message }));
+        }
+      });
+
+      // GET /api/config/allowed-users - Get list of allowed users
+      server.middlewares.use('/api/config/allowed-users', async (req, res, next) => {
+        if (req.method !== 'GET') {
+          return next();
+        }
+
+        try {
+          if (!storage || !bucketName) {
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error: 'GCS not configured' }));
+            return;
+          }
+
+          const file = storage.bucket(bucketName).file('config/allowed_users.json');
+          const [exists] = await file.exists();
+          
+          if (!exists) {
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ users: [] }));
+            return;
+          }
+
+          const [content] = await file.download();
+          const config = JSON.parse(content.toString());
+          
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ users: config.allowed_users || [] }));
+        } catch (error: any) {
+          console.error('Allowed users endpoint error:', error);
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: error.message }));
+        }
+      });
+
+      // GET /api/config/admin-users - Get list of admin users (admin only)
+      server.middlewares.use('/api/config/admin-users', async (req, res, next) => {
+        if (req.method !== 'GET') {
+          return next();
+        }
+
+        try {
+          if (!storage || !bucketName) {
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error: 'GCS not configured' }));
+            return;
+          }
+
+          const file = storage.bucket(bucketName).file('config/admin_users.json');
+          const [exists] = await file.exists();
+          
+          if (!exists) {
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ admins: [] }));
+            return;
+          }
+
+          const [content] = await file.download();
+          const config = JSON.parse(content.toString());
+          
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ admins: config.admin_users || [] }));
+        } catch (error: any) {
+          console.error('Admin users endpoint error:', error);
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: error.message }));
+        }
       });
     }
   };
