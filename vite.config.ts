@@ -3,6 +3,7 @@ import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import { Storage } from '@google-cloud/storage';
 import { PubSub } from '@google-cloud/pubsub';
+import { OAuth2Client } from 'google-auth-library';
 import dotenv from 'dotenv';
 import fs from 'fs';
 
@@ -13,16 +14,23 @@ const gcsProxyPlugin = () => {
   let pubsub: PubSub;
   let projectId: string;
   let scrapingTopic: string;
+  let authClient: OAuth2Client;
+  let googleClientId: string;
 
   try {
     // Load env from current directory
     const envPath = path.resolve(__dirname, '.env');
     if (fs.existsSync(envPath)) {
       const envConfig = dotenv.parse(fs.readFileSync(envPath));
-      
+
+      // Disable SSL verification for development (WSL certificate issue)
+      if (envConfig.NODE_TLS_REJECT_UNAUTHORIZED === '0') {
+        process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+      }
+
       // Resolve key file path relative to the .env file location
       const keyFilename = path.resolve(path.dirname(envPath), envConfig.GOOGLE_APPLICATION_CREDENTIALS);
-      
+
       storage = new Storage({
         projectId: envConfig.GCP_PROJECT_ID,
         keyFilename: keyFilename,
@@ -30,21 +38,138 @@ const gcsProxyPlugin = () => {
       bucketName = envConfig.GCS_BUCKET_NAME;
       projectId = envConfig.GCP_PROJECT_ID;
       scrapingTopic = envConfig.SCRAPING_REQUEST_TOPIC || 'scraping-requests';
-      
+      googleClientId = envConfig.VITE_GOOGLE_CLIENT_ID;
+
       // Initialize Pub/Sub client
       pubsub = new PubSub({
         projectId: projectId,
         keyFilename: keyFilename,
       });
-      
+
+      // Initialize OAuth2 client for JWT verification
+      authClient = new OAuth2Client(googleClientId);
+
       console.log(`GCS Proxy configured for bucket: ${bucketName}`);
       console.log(`Pub/Sub configured for topic: ${scrapingTopic}`);
+      console.log(`OAuth2 Client configured for: ${googleClientId}`);
     } else {
       console.warn('GCS Proxy: .env file not found in current directory');
     }
   } catch (e) {
     console.error('GCS Proxy Init Error:', e);
   }
+
+  // --- CACHING LAYER ---
+  const CACHE = {
+    allowedUsers: { data: null as string[] | null, timestamp: null as number | null, TTL: 5 * 60 * 1000 }, // 5 minutes
+    adminUsers: { data: null as string[] | null, timestamp: null as number | null, TTL: 5 * 60 * 1000 },
+  };
+
+  const isCacheValid = (cacheEntry: typeof CACHE.allowedUsers) => {
+    return cacheEntry.data !== null &&
+           cacheEntry.timestamp !== null &&
+           (Date.now() - cacheEntry.timestamp) < cacheEntry.TTL;
+  };
+
+  // --- HELPER FUNCTIONS ---
+
+  const FALLBACK_ALLOWED_EMAILS = ['oktay.burak.ertas@gmail.com'];
+
+  const loadAllowedUsers = async (): Promise<string[]> => {
+    if (isCacheValid(CACHE.allowedUsers)) {
+      return CACHE.allowedUsers.data!;
+    }
+
+    try {
+      const bucket = storage.bucket(bucketName);
+      const file = bucket.file('config/allowed_users.json');
+      const [exists] = await file.exists();
+
+      if (!exists) {
+        console.warn('allowed_users.json not found in GCS, using fallback list');
+        return FALLBACK_ALLOWED_EMAILS;
+      }
+
+      const [content] = await file.download();
+      const config = JSON.parse(content.toString());
+      const users = config.allowed_users || FALLBACK_ALLOWED_EMAILS;
+
+      CACHE.allowedUsers.data = users;
+      CACHE.allowedUsers.timestamp = Date.now();
+
+      return users;
+    } catch (error) {
+      console.error('Error loading allowed users from GCS:', error);
+      return FALLBACK_ALLOWED_EMAILS;
+    }
+  };
+
+  const loadAdminUsers = async (): Promise<string[]> => {
+    if (isCacheValid(CACHE.adminUsers)) {
+      return CACHE.adminUsers.data!;
+    }
+
+    try {
+      const bucket = storage.bucket(bucketName);
+      const file = bucket.file('config/admin_users.json');
+      const [exists] = await file.exists();
+
+      if (!exists) {
+        console.warn('admin_users.json not found in GCS');
+        return [];
+      }
+
+      const [content] = await file.download();
+      const config = JSON.parse(content.toString());
+      const admins = config.admin_users || [];
+
+      CACHE.adminUsers.data = admins;
+      CACHE.adminUsers.timestamp = Date.now();
+
+      return admins;
+    } catch (error) {
+      console.error('Error loading admin users from GCS:', error);
+      return [];
+    }
+  };
+
+  const verifyAuth = async (authHeader: string | undefined): Promise<{ email: string; isAdmin: boolean } | null> => {
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return null;
+    }
+
+    const token = authHeader.split(' ')[1];
+
+    try {
+      // Verify JWT token with Google
+      const ticket = await authClient.verifyIdToken({
+        idToken: token,
+        audience: googleClientId,
+      });
+      const payload = ticket.getPayload();
+      if (!payload || !payload.email) {
+        return null;
+      }
+
+      const email = payload.email;
+
+      // Check if user is allowed
+      const allowedEmails = await loadAllowedUsers();
+      if (!allowedEmails.includes(email)) {
+        console.warn(`Access denied for email: ${email}`);
+        return null;
+      }
+
+      // Check if user is admin
+      const adminUsers = await loadAdminUsers();
+      const isAdmin = adminUsers.includes(email);
+
+      return { email, isAdmin };
+    } catch (error) {
+      console.error('Auth verification failed:', error);
+      return null;
+    }
+  };
 
   return {
     name: 'gcs-proxy',
@@ -212,6 +337,16 @@ const gcsProxyPlugin = () => {
           return;
         }
 
+        // Verify authentication first
+        const authHeader = req.headers.authorization as string | undefined;
+        const user = await verifyAuth(authHeader);
+
+        if (!user) {
+          res.statusCode = 401;
+          res.end(JSON.stringify({ error: 'Unauthorized' }));
+          return;
+        }
+
         let body = '';
         req.on('data', chunk => {
           body += chunk.toString();
@@ -220,41 +355,27 @@ const gcsProxyPlugin = () => {
         req.on('end', async () => {
           try {
             const payload = JSON.parse(body);
-            
-            // Extract user email from Authorization header (JWT token)
-            const authHeader = req.headers.authorization;
-            let triggeredBy = 'system';
-            if (authHeader && authHeader.startsWith('Bearer ')) {
-              try {
-                const token = authHeader.split(' ')[1];
-                const payloadBase64 = token.split('.')[1];
-                const decodedPayload = JSON.parse(Buffer.from(payloadBase64, 'base64').toString());
-                triggeredBy = decodedPayload.email || 'system';
-              } catch (e) {
-                console.warn('Could not extract email from token');
-              }
-            }
-            
+
             // Add triggered_by to payload
-            payload.triggered_by = triggeredBy;
-            
-            console.log(`Triggering scraper for ${payload.collection_id} by ${triggeredBy}:`, payload);
-            
+            payload.triggered_by = user.email;
+
+            console.log(`Triggering scraper for ${payload.collection_id} by ${user.email}:`, payload);
+
             // Publish to Pub/Sub topic
             const topicPath = pubsub.topic(scrapingTopic);
             const dataBuffer = Buffer.from(JSON.stringify(payload));
-            
+
             const messageId = await topicPath.publishMessage({ data: dataBuffer });
-            
+
             console.log(`✅ Published message ${messageId} to topic ${scrapingTopic}`);
-            
+
             res.setHeader('Content-Type', 'application/json');
-            res.end(JSON.stringify({ 
-              success: true, 
+            res.end(JSON.stringify({
+              success: true,
               messageId,
               region: payload.collection_id,
               sourcesCount: payload.urls.length,
-              triggeredBy
+              triggeredBy: user.email
             }));
           } catch (error: any) {
             console.error('Scraper trigger error:', error);
@@ -271,42 +392,29 @@ const gcsProxyPlugin = () => {
         }
 
         try {
-          const authHeader = req.headers.authorization;
-          if (!authHeader || !authHeader.startsWith('Bearer ')) {
+          const authHeader = req.headers.authorization as string | undefined;
+          const user = await verifyAuth(authHeader);
+
+          if (!user) {
             res.statusCode = 401;
-            res.end(JSON.stringify({ error: 'Missing authorization' }));
+            res.end(JSON.stringify({ error: 'Unauthorized' }));
             return;
           }
 
-          // Decode JWT token (already verified by Google on client side)
-          const token = authHeader.split(' ')[1];
-          const payloadBase64 = token.split('.')[1];
-          const decodedPayload = JSON.parse(Buffer.from(payloadBase64, 'base64').toString());
-          
-          const email = decodedPayload.email;
-          
-          // Check if user is admin
-          let isAdmin = false;
-          if (storage && bucketName) {
-            try {
-              const adminFile = storage.bucket(bucketName).file('config/admin_users.json');
-              const [exists] = await adminFile.exists();
-              if (exists) {
-                const [content] = await adminFile.download();
-                const adminConfig = JSON.parse(content.toString());
-                isAdmin = (adminConfig.admin_users || []).includes(email);
-              }
-            } catch (e) {
-              console.warn('Could not load admin users:', e);
-            }
-          }
+          // Get user's full profile from JWT token payload
+          const token = authHeader!.split(' ')[1];
+          const ticket = await authClient.verifyIdToken({
+            idToken: token,
+            audience: googleClientId,
+          });
+          const payload = ticket.getPayload();
 
           res.setHeader('Content-Type', 'application/json');
           res.end(JSON.stringify({
-            email: email,
-            name: decodedPayload.name,
-            picture: decodedPayload.picture,
-            isAdmin: isAdmin
+            email: user.email,
+            name: payload?.name || '',
+            picture: payload?.picture || '',
+            isAdmin: user.isAdmin
           }));
         } catch (error: any) {
           console.error('User endpoint error:', error);
@@ -315,33 +423,40 @@ const gcsProxyPlugin = () => {
         }
       });
 
-      // GET /api/config/allowed-users - Get list of allowed users
+      // GET /api/config/allowed-users - Get list of allowed users (admin only)
       server.middlewares.use('/api/config/allowed-users', async (req, res, next) => {
         if (req.method !== 'GET') {
           return next();
         }
 
         try {
+          // Verify authentication
+          const authHeader = req.headers.authorization as string | undefined;
+          const user = await verifyAuth(authHeader);
+
+          if (!user) {
+            res.statusCode = 401;
+            res.end(JSON.stringify({ error: 'Unauthorized' }));
+            return;
+          }
+
+          // Check if user is admin
+          if (!user.isAdmin) {
+            res.statusCode = 403;
+            res.end(JSON.stringify({ error: 'Admin access required' }));
+            return;
+          }
+
           if (!storage || !bucketName) {
             res.statusCode = 500;
             res.end(JSON.stringify({ error: 'GCS not configured' }));
             return;
           }
 
-          const file = storage.bucket(bucketName).file('config/allowed_users.json');
-          const [exists] = await file.exists();
-          
-          if (!exists) {
-            res.setHeader('Content-Type', 'application/json');
-            res.end(JSON.stringify({ users: [] }));
-            return;
-          }
+          const allowedUsers = await loadAllowedUsers();
 
-          const [content] = await file.download();
-          const config = JSON.parse(content.toString());
-          
           res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify({ users: config.allowed_users || [] }));
+          res.end(JSON.stringify({ allowed_users: allowedUsers }));
         } catch (error: any) {
           console.error('Allowed users endpoint error:', error);
           res.statusCode = 500;
@@ -349,38 +464,103 @@ const gcsProxyPlugin = () => {
         }
       });
 
-      // GET /api/config/admin-users - Get list of admin users (admin only)
+      // GET /api/config/admin-users - Get current user's admin status (NOT the full admin list)
       server.middlewares.use('/api/config/admin-users', async (req, res, next) => {
         if (req.method !== 'GET') {
           return next();
         }
 
         try {
-          if (!storage || !bucketName) {
-            res.statusCode = 500;
-            res.end(JSON.stringify({ error: 'GCS not configured' }));
+          // Verify authentication
+          const authHeader = req.headers.authorization as string | undefined;
+          const user = await verifyAuth(authHeader);
+
+          if (!user) {
+            res.statusCode = 401;
+            res.end(JSON.stringify({ error: 'Unauthorized' }));
             return;
           }
 
-          const file = storage.bucket(bucketName).file('config/admin_users.json');
-          const [exists] = await file.exists();
-          
-          if (!exists) {
-            res.setHeader('Content-Type', 'application/json');
-            res.end(JSON.stringify({ admins: [] }));
-            return;
-          }
-
-          const [content] = await file.download();
-          const config = JSON.parse(content.toString());
-          
+          // Only return the current user's admin status, not the full list
+          // This prevents exposing who the admins are for security reasons
           res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify({ admins: config.admin_users || [] }));
+          res.end(JSON.stringify({
+            email: user.email,
+            isAdmin: user.isAdmin
+          }));
         } catch (error: any) {
           console.error('Admin users endpoint error:', error);
           res.statusCode = 500;
           res.end(JSON.stringify({ error: error.message }));
         }
+      });
+
+      // POST /api/trigger-news-api - Trigger News API fetch
+      server.middlewares.use('/api/trigger-news-api', async (req, res, next) => {
+        if (req.method !== 'POST') {
+          res.statusCode = 405;
+          res.end(JSON.stringify({ error: 'Method not allowed' }));
+          return;
+        }
+
+        if (!pubsub || !projectId) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: 'Pub/Sub not configured' }));
+          return;
+        }
+
+        // Verify authentication first
+        const authHeader = req.headers.authorization as string | undefined;
+        const user = await verifyAuth(authHeader);
+
+        if (!user) {
+          res.statusCode = 401;
+          res.end(JSON.stringify({ error: 'Unauthorized' }));
+          return;
+        }
+
+        let body = '';
+        req.on('data', chunk => {
+          body += chunk.toString();
+        });
+
+        req.on('end', async () => {
+          try {
+            const payload = JSON.parse(body);
+
+            // Build message payload
+            const messagePayload = {
+              keywords: payload.keywords || ['fenerbahce', 'galatasaray', 'tedesco'],
+              time_range: payload.time_range || 'last_24_hours',
+              max_results: payload.max_results || 50,
+              triggered_by: user.email
+            };
+
+            console.log(`Triggering News API fetch by ${user.email}:`, messagePayload);
+
+            // Publish to Pub/Sub topic
+            const newsApiTopic = 'news-api-requests';
+            const topicPath = pubsub.topic(newsApiTopic);
+            const dataBuffer = Buffer.from(JSON.stringify(messagePayload));
+
+            const messageId = await topicPath.publishMessage({ data: dataBuffer });
+
+            console.log(`✅ Published message ${messageId} to topic ${newsApiTopic}`);
+
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({
+              success: true,
+              messageId,
+              keywords: messagePayload.keywords,
+              time_range: messagePayload.time_range,
+              triggeredBy: user.email
+            }));
+          } catch (error: any) {
+            console.error('News API trigger error:', error);
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error: error.message }));
+          }
+        });
       });
     }
   };
