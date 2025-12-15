@@ -47,6 +47,7 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'feed' | 'scraper'>('feed');
   const [showTagSettings, setShowTagSettings] = useState(false);
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
+  const [sourceTypeFilter, setSourceTypeFilter] = useState<{ scraped: boolean; api: boolean }>({ scraped: true, api: true });
   
   // Multi-user state
   const [isAdmin, setIsAdmin] = useState(false);
@@ -274,13 +275,18 @@ const App: React.FC = () => {
       const matchesTags = selectedTags.size === 0 || 
                           entry.categories?.some(cat => selectedTags.has(cat));
       
+      // Source type filtering
+      const entrySourceType = entry.source_type || 'scraped'; // Default to scraped for backward compatibility
+      const matchesSourceType = (entrySourceType === 'scraped' && sourceTypeFilter.scraped) ||
+                                 (entrySourceType === 'api' && sourceTypeFilter.api);
+      
       // Note: Date filtering is handled by the API (based on scraping date),
       // not here (which would filter by article published_date).
       // Articles scraped on 2025-12-05 might have been published days earlier.
 
-      return matchesSearch && matchesStatus && matchesTags;
+      return matchesSearch && matchesStatus && matchesTags && matchesSourceType;
     });
-  }, [entries, filters, selectedTags]);
+  }, [entries, filters, selectedTags, sourceTypeFilter]);
 
   // Actions
   const handlePost = (id: string) => {
@@ -522,6 +528,28 @@ const App: React.FC = () => {
                   <h2 className="text-lg font-semibold text-white">
                     Feed <span className="ml-2 px-2 py-0.5 bg-slate-800 text-slate-400 text-xs rounded-full">{filteredEntries.length}</span>
                   </h2>
+                  {/* Source Type Filter */}
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 rounded-lg border border-slate-700">
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={sourceTypeFilter.scraped}
+                        onChange={(e) => setSourceTypeFilter(prev => ({ ...prev, scraped: e.target.checked }))}
+                        className="w-3 h-3 rounded border-slate-600 bg-slate-700 text-orange-500 focus:ring-orange-500 focus:ring-offset-slate-800"
+                      />
+                      <span className="text-xs font-medium text-orange-400">Scraped</span>
+                    </label>
+                    <div className="w-px h-4 bg-slate-600"></div>
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={sourceTypeFilter.api}
+                        onChange={(e) => setSourceTypeFilter(prev => ({ ...prev, api: e.target.checked }))}
+                        className="w-3 h-3 rounded border-slate-600 bg-slate-700 text-blue-500 focus:ring-blue-500 focus:ring-offset-slate-800"
+                      />
+                      <span className="text-xs font-medium text-blue-400">API</span>
+                    </label>
+                  </div>
                   <button
                     onClick={() => setShowTagSettings(!showTagSettings)}
                     className={`p-2 rounded-lg transition-colors border ${
@@ -669,12 +697,27 @@ const NewsCard: React.FC<{
               {entry.source}
             </a>
             <span className="text-xs text-slate-500">{timeAgo(entry.published_date)}</span>
+            {/* Source Type Badge - sphere with text on hover */}
+            <span className={`group relative flex items-center gap-1 cursor-default`}>
+              <span className={`w-2.5 h-2.5 rounded-full ${
+                entry.source_type === 'api' 
+                  ? 'bg-blue-500' 
+                  : 'bg-orange-500'
+              }`}></span>
+              <span className={`text-[10px] font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-200 ${
+                entry.source_type === 'api' 
+                  ? 'text-blue-400' 
+                  : 'text-orange-400'
+              }`}>
+                {entry.source_type === 'api' ? 'API' : 'SCRAPED'}
+              </span>
+            </span>
             <span className={`text-[10px] px-1.5 py-0.5 rounded border ${
               entry.content_quality === 'high' ? 'border-green-800 text-green-400 bg-green-900/20' : 
               entry.content_quality === 'medium' ? 'border-yellow-800 text-yellow-400 bg-yellow-900/20' : 
               'border-red-800 text-red-400 bg-red-900/20'
             }`}>
-              {entry.content_quality.toUpperCase()}
+              {entry.content_quality?.toUpperCase() || 'N/A'}
             </span>
             {entry.article_id && (
               <button

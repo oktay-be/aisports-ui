@@ -1,7 +1,0 @@
-{
-  "admin_users": [
-    "oktay.burak.ertas@gmail.com"
-  ],
-  "last_updated": "2025-12-14T00:00:00Z",
-  "_comment": "Upload this file to gs://aisports-scraping/config/admin_users.json"
-}

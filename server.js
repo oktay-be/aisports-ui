@@ -20,7 +20,7 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 
 // GCS Config paths
 const CONFIG_FOLDER = 'config/';
-const USER_PREFERENCES_FOLDER = 'user_preferences/';
+const USER_PREFERENCES_FOLDER = 'config/user_preferences/';
 
 // Fallback allowed emails (used if GCS config not available)
 const FALLBACK_ALLOWED_EMAILS = [
@@ -261,26 +261,29 @@ app.get('/api/news', async (req, res) => {
     const lastNDays = parseInt(req.query.last_n_days || '0');
     const triggeredByFilter = req.query.triggered_by; // 'me', 'all', or specific email
 
-    let prefix = `news_data/batch_processing/${region}/`;
+    let allArticles = [];
+
+    // --- FETCH FROM SCRAPED DATA (batch_processing path) ---
+    let scraperPrefix = `news_data/batch_processing/${region}/`;
 
     if (dateParam) {
       const [year, month] = dateParam.split('-');
-      prefix = `news_data/batch_processing/${region}/${year}-${month}/${dateParam}/`;
+      scraperPrefix = `news_data/batch_processing/${region}/${year}-${month}/${dateParam}/`;
     } else if (lastNDays > 0) {
-      // Fetching data from last N days
+      // Fetching data from last N days - prefix stays broad
     } else {
       const now = new Date();
       const year = now.getFullYear();
       const month = String(now.getMonth() + 1).padStart(2, '0');
-      prefix = `news_data/batch_processing/${region}/${year}-${month}/`;
+      scraperPrefix = `news_data/batch_processing/${region}/${year}-${month}/`;
     }
 
-    console.log(`Looking for files in ${BUCKET_NAME} with prefix ${prefix}...`);
+    console.log(`Looking for scraped files in ${BUCKET_NAME} with prefix ${scraperPrefix}...`);
 
-    const [files] = await storage.bucket(BUCKET_NAME).getFiles({ prefix });
+    const [scraperFiles] = await storage.bucket(BUCKET_NAME).getFiles({ prefix: scraperPrefix });
 
     // Filter for stage 2 prediction results
-    let resultFiles = files.filter(f => 
+    let resultFiles = scraperFiles.filter(f => 
       f.name.includes('stage2_deduplication/results') && 
       f.name.endsWith('predictions.jsonl')
     );
@@ -313,8 +316,6 @@ app.get('/api/news', async (req, res) => {
       const filteredFiles = [];
       for (const file of resultFiles) {
         try {
-          // Extract run folder path from predictions file path
-          // Example: news_data/batch_processing/tr/2025-12/2025-12-13/run_21-51-39/stage2_deduplication/results/...predictions.jsonl
           const runFolderMatch = file.name.match(/(news_data\/batch_processing\/[^/]+\/\d{4}-\d{2}\/\d{4}-\d{2}-\d{2}\/run_[^/]+)\//);
           if (runFolderMatch) {
             const metadataPath = `${runFolderMatch[1]}/metadata.json`;
@@ -330,7 +331,6 @@ app.get('/api/news', async (req, res) => {
                 filteredFiles.push(file);
               }
             } else {
-              // No metadata = system triggered (historical data)
               if (targetEmail === 'system') {
                 filteredFiles.push(file);
               }
@@ -338,7 +338,6 @@ app.get('/api/news', async (req, res) => {
           }
         } catch (err) {
           console.warn(`Error checking metadata for ${file.name}:`, err.message);
-          // Include file if we can't determine ownership (backward compatibility)
           if (triggeredByFilter === 'all' || !triggeredByFilter) {
             filteredFiles.push(file);
           }
@@ -347,16 +346,12 @@ app.get('/api/news', async (req, res) => {
       resultFiles = filteredFiles;
     }
 
-    if (resultFiles.length === 0) {
-      return res.status(404).json({ error: 'No data found' });
-    }
-
     // Sort by name descending (latest first)
     resultFiles.sort((a, b) => b.name.localeCompare(a.name));
 
-    let filesToProcess = latestOnly ? [resultFiles[0]] : resultFiles;
-    let allArticles = [];
+    let filesToProcess = latestOnly ? (resultFiles.length > 0 ? [resultFiles[0]] : []) : resultFiles;
 
+    // Process scraped files
     for (const file of filesToProcess) {
       const [content] = await file.download();
       const fileContent = content.toString();
@@ -365,24 +360,31 @@ app.get('/api/news', async (req, res) => {
       for (const line of lines) {
         try {
           const json = JSON.parse(line);
-          // Logic copied from vite.config.ts
+          let articlesToAdd = [];
+          
           if (json.response?.candidates?.[0]?.content?.parts?.[0]?.text) {
             const text = json.response.candidates[0].content.parts[0].text;
             const cleanText = text.replace(/```json\n?|\n?```/g, '');
             try {
               const parsedInner = JSON.parse(cleanText);
-              if (parsedInner.processed_articles) allArticles.push(...parsedInner.processed_articles);
-              else if (parsedInner.consolidated_articles) allArticles.push(...parsedInner.consolidated_articles);
-              else if (Array.isArray(parsedInner)) allArticles.push(...parsedInner);
-              else if (parsedInner.title) allArticles.push(parsedInner);
+              if (parsedInner.processed_articles) articlesToAdd = parsedInner.processed_articles;
+              else if (parsedInner.consolidated_articles) articlesToAdd = parsedInner.consolidated_articles;
+              else if (Array.isArray(parsedInner)) articlesToAdd = parsedInner;
+              else if (parsedInner.title) articlesToAdd = [parsedInner];
             } catch (e) { console.error('Error parsing inner JSON:', e); }
           } else if (json.title && json.summary && json.original_url) {
-            allArticles.push(json);
+            articlesToAdd = [json];
           } else if (Array.isArray(json)) {
-            allArticles.push(...json);
+            articlesToAdd = json;
           } else if (json.prediction) {
-            if (Array.isArray(json.prediction)) allArticles.push(...json.prediction);
-            else allArticles.push(json.prediction);
+            if (Array.isArray(json.prediction)) articlesToAdd = json.prediction;
+            else articlesToAdd = [json.prediction];
+          }
+          
+          // Add source_type: 'scraped' to each article
+          for (const article of articlesToAdd) {
+            article.source_type = 'scraped';
+            allArticles.push(article);
           }
         } catch (err) {
           console.error('Error parsing line in file ' + file.name, err);
@@ -390,7 +392,109 @@ app.get('/api/news', async (req, res) => {
       }
     }
 
-    res.json(allArticles);
+    // --- FETCH FROM API DATA (news_data/api path) ---
+    let apiPrefix = `news_data/api/`;
+
+    if (dateParam) {
+      const [year, month] = dateParam.split('-');
+      apiPrefix = `news_data/api/${year}-${month}/${dateParam}/`;
+    } else if (lastNDays > 0) {
+      // Keep broad prefix for N days lookup
+    } else {
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      apiPrefix = `news_data/api/${year}-${month}/`;
+    }
+
+    console.log(`Looking for API-fetched files in ${BUCKET_NAME} with prefix ${apiPrefix}...`);
+
+    try {
+      const [apiFiles] = await storage.bucket(BUCKET_NAME).getFiles({ prefix: apiPrefix });
+      
+      // Filter for articles.json files
+      let apiResultFiles = apiFiles.filter(f => f.name.endsWith('articles.json'));
+      
+      // If fetching last N days, filter by date
+      if (lastNDays > 0) {
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - lastNDays);
+        
+        apiResultFiles = apiResultFiles.filter(f => {
+          const match = f.name.match(/(\d{4})-(\d{2})-(\d{2})/);
+          if (match) {
+            const fileDate = new Date(match[0]);
+            return fileDate >= cutoffDate;
+          }
+          return false;
+        });
+      }
+
+      // Sort by name descending (latest first)
+      apiResultFiles.sort((a, b) => b.name.localeCompare(a.name));
+
+      let apiFilesToProcess = latestOnly ? (apiResultFiles.length > 0 ? [apiResultFiles[0]] : []) : apiResultFiles;
+
+      // Process API files
+      for (const file of apiFilesToProcess) {
+        try {
+          const [content] = await file.download();
+          const data = JSON.parse(content.toString());
+          
+          if (data.articles && Array.isArray(data.articles)) {
+            for (const article of data.articles) {
+              // Transform API article to match ProcessedArticle schema
+              const transformedArticle = {
+                article_id: article.article_id || `api_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                original_url: article.url || article.original_url,
+                title: article.title || 'Untitled',
+                summary: article.content || article.summary || article.description || '',
+                source: article.source || article.api_source || 'News API',
+                published_date: article.published_at || article.published_date || new Date().toISOString(),
+                categories: article.categories || [],
+                key_entities: article.key_entities || {
+                  competitions: [],
+                  locations: [],
+                  players: [],
+                  teams: []
+                },
+                content_quality: article.content_quality || 'medium',
+                confidence: article.confidence || 0.5,
+                language: article.language || 'en',
+                summary_translation: article.summary_translation,
+                x_post: article.x_post,
+                source_type: 'api',
+                image_url: article.image_url
+              };
+              allArticles.push(transformedArticle);
+            }
+            console.log(`Added ${data.articles.length} articles from API file: ${file.name}`);
+          }
+        } catch (err) {
+          console.error('Error parsing API file ' + file.name, err);
+        }
+      }
+    } catch (apiErr) {
+      console.warn('Error fetching API news data (may not exist yet):', apiErr.message);
+    }
+
+    // --- DEDUPLICATE BY URL ---
+    const seenUrls = new Set();
+    const uniqueArticles = [];
+    for (const article of allArticles) {
+      const url = article.original_url || article.url;
+      if (url && !seenUrls.has(url)) {
+        seenUrls.add(url);
+        uniqueArticles.push(article);
+      }
+    }
+
+    if (uniqueArticles.length === 0) {
+      return res.status(404).json({ error: 'No data found' });
+    }
+
+    console.log(`Returning ${uniqueArticles.length} unique articles (${allArticles.length - uniqueArticles.length} duplicates removed)`);
+    res.json(uniqueArticles);
   } catch (error) {
     console.error('GCS Proxy Request Error:', error);
     res.status(500).json({ error: error.message });
@@ -424,6 +528,36 @@ app.post('/api/trigger-scraper', async (req, res) => {
     });
   } catch (error) {
     console.error('Scraper trigger error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/trigger-news-api
+const NEWS_API_TOPIC = process.env.NEWS_API_REQUEST_TOPIC || 'news-api-requests';
+
+app.post('/api/trigger-news-api', async (req, res) => {
+  try {
+    const payload = {
+      keywords: req.body.keywords || ['fenerbahce', 'galatasaray', 'tedesco'],
+      time_range: req.body.time_range || 'last_24_hours',
+      max_results: req.body.max_results || 50,
+      triggered_by: req.user.email
+    };
+    console.log(`Triggering News API fetch by ${req.user.email}:`, payload);
+
+    const topicPath = pubsub.topic(NEWS_API_TOPIC);
+    const dataBuffer = Buffer.from(JSON.stringify(payload));
+    const messageId = await topicPath.publishMessage({ data: dataBuffer });
+
+    console.log(`✅ Published message ${messageId} to topic ${NEWS_API_TOPIC}`);
+    res.json({ 
+      success: true, 
+      messageId,
+      keywords: payload.keywords,
+      triggeredBy: req.user.email
+    });
+  } catch (error) {
+    console.error('News API trigger error:', error);
     res.status(500).json({ error: error.message });
   }
 });

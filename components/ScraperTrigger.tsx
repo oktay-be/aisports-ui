@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { DEFAULT_SCRAPER_CONFIG, ScraperRegionConfig } from '../scraper-config';
-import { loadPreferences, savePreferences, UserPreferences } from '../services/userPreferencesService';
+import { loadPreferences, savePreferences, UserPreferences, UserScraperConfig, saveScraperConfigDebounced } from '../services/userPreferencesService';
 
 const ChevronDownIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
@@ -251,6 +251,9 @@ export const ScraperTrigger: React.FC<{ token?: string }> = ({ token }) => {
   const [euKeywordsInput, setEuKeywordsInput] = useState(DEFAULT_SCRAPER_CONFIG.eu.keywords.join(', '));
   const [trKeywordsInput, setTrKeywordsInput] = useState(DEFAULT_SCRAPER_CONFIG.tr.keywords.join(', '));
   const [preferencesLoaded, setPreferencesLoaded] = useState(false);
+  
+  // Track if initial load is complete to avoid saving on mount
+  const initialLoadComplete = useRef(false);
 
   // Load user preferences on mount
   useEffect(() => {
@@ -258,17 +261,39 @@ export const ScraperTrigger: React.FC<{ token?: string }> = ({ token }) => {
     
     const loadUserPreferences = async () => {
       const prefs = await loadPreferences(token);
-      if (prefs.lastScraperConfig) {
-        // Apply saved preferences if available
-        // Note: For now we just mark as loaded. 
-        // Full config restoration could be added later.
-        console.log('User preferences loaded:', prefs);
+      if (prefs.scraperConfig) {
+        // Apply saved scraper config
+        if (prefs.scraperConfig.eu) {
+          setEuConfig(prefs.scraperConfig.eu);
+          setEuKeywordsInput(prefs.scraperConfig.eu.keywords.join(', '));
+        }
+        if (prefs.scraperConfig.tr) {
+          setTrConfig(prefs.scraperConfig.tr);
+          setTrKeywordsInput(prefs.scraperConfig.tr.keywords.join(', '));
+        }
+        console.log('User scraper preferences loaded:', prefs.scraperConfig);
       }
       setPreferencesLoaded(true);
+      // Mark initial load as complete after a small delay to avoid immediate save
+      setTimeout(() => {
+        initialLoadComplete.current = true;
+      }, 100);
     };
     
     loadUserPreferences();
   }, [token]);
+
+  // Auto-save whenever config changes (debounced)
+  useEffect(() => {
+    if (!token || !initialLoadComplete.current) return;
+    
+    const scraperConfig: UserScraperConfig = {
+      eu: euConfig,
+      tr: trConfig,
+    };
+    
+    saveScraperConfigDebounced(token, scraperConfig);
+  }, [token, euConfig, trConfig]);
 
   const handleTrigger = async (region: 'eu' | 'tr') => {
     setTriggering(region);

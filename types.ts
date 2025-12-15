@@ -28,6 +28,7 @@ export interface ProcessedArticle {
   summary_translation?: string;
   x_post?: string;
   _dedup_metadata?: any;
+  source_type?: 'scraped' | 'api';
 }
 
 export interface NewsEntry extends ProcessedArticle {

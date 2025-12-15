@@ -5,6 +5,14 @@
  * Preferences are stored per-user using email hash as the folder identifier.
  */
 
+import { ScraperRegionConfig, ScraperSource } from '../scraper-config';
+
+// Scraper config stored per user (keywords, sources, scrapeDepth for each region)
+export interface UserScraperConfig {
+  eu: ScraperRegionConfig;
+  tr: ScraperRegionConfig;
+}
+
 // User preferences structure stored in GCS
 export interface UserPreferences {
   lastScraperConfig?: {
@@ -16,6 +24,7 @@ export interface UserPreferences {
       to: string;
     };
   };
+  scraperConfig?: UserScraperConfig;
   feedFilter?: 'my' | 'all' | string; // 'my' = my feeds, 'all' = all feeds, string = specific user email
   savedAt?: string;
 }
@@ -57,9 +66,11 @@ export async function loadPreferences(token: string): Promise<UserPreferences> {
     }
 
     const data = await response.json();
+    // Server returns the full preferences object directly
     return {
       ...DEFAULT_PREFERENCES,
-      ...data.preferences,
+      scraperConfig: data.scraperConfig,
+      feedFilter: data.feedSettings?.feedFilter || DEFAULT_PREFERENCES.feedFilter,
     };
   } catch (error) {
     console.error('Error loading preferences:', error);
@@ -85,7 +96,12 @@ export async function savePreferences(
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ preferences }),
+      body: JSON.stringify({
+        scraperConfig: preferences.scraperConfig,
+        feedSettings: {
+          feedFilter: preferences.feedFilter,
+        },
+      }),
     });
 
     if (!response.ok) {
@@ -122,10 +138,36 @@ export async function updatePreferences(
     lastScraperConfig: updates.lastScraperConfig 
       ? { ...current.lastScraperConfig, ...updates.lastScraperConfig }
       : current.lastScraperConfig,
+    // Deep merge for scraperConfig
+    scraperConfig: updates.scraperConfig || current.scraperConfig,
   };
   
   // Save merged preferences
   await savePreferences(token, updated);
   
   return updated;
+}
+
+/**
+ * Save scraper config with debounce (auto-save on change)
+ */
+let saveTimeout: ReturnType<typeof setTimeout> | null = null;
+
+export function saveScraperConfigDebounced(
+  token: string,
+  scraperConfig: UserScraperConfig,
+  delay: number = 500
+): void {
+  if (saveTimeout) {
+    clearTimeout(saveTimeout);
+  }
+  
+  saveTimeout = setTimeout(async () => {
+    try {
+      await savePreferences(token, { scraperConfig });
+      console.log('Scraper config auto-saved');
+    } catch (error) {
+      console.error('Failed to auto-save scraper config:', error);
+    }
+  }, delay);
 }
