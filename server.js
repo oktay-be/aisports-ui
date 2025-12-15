@@ -2,6 +2,8 @@ import express from 'express';
 import { Storage } from '@google-cloud/storage';
 import { PubSub } from '@google-cloud/pubsub';
 import { OAuth2Client } from 'google-auth-library';
+import { rateLimit } from 'express-rate-limit';
+import { z } from 'zod';
 import crypto from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -16,21 +18,70 @@ const port = process.env.PORT || 8080;
 const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT;
 const BUCKET_NAME = process.env.GCS_BUCKET_NAME;
 const SCRAPING_TOPIC = process.env.SCRAPING_REQUEST_TOPIC || 'scraping-requests';
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID; 
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 
 // GCS Config paths
 const CONFIG_FOLDER = 'config/';
 const USER_PREFERENCES_FOLDER = 'config/user_preferences/';
+const AUDIT_LOG_FOLDER = 'audit_logs/';
 
 // Fallback allowed emails (used if GCS config not available)
 const FALLBACK_ALLOWED_EMAILS = [
-  'oktay.burak.ertas@gmail.com', 
+  'oktay.burak.ertas@gmail.com',
 ];
 
 // Initialize Clients
 const storage = new Storage({ projectId: PROJECT_ID });
 const pubsub = new PubSub({ projectId: PROJECT_ID });
 const authClient = new OAuth2Client(GOOGLE_CLIENT_ID);
+
+// --- CACHING LAYER (Fix N+1 Query Problem) ---
+const CACHE = {
+  allowedUsers: { data: null, timestamp: null, TTL: 5 * 60 * 1000 }, // 5 minutes
+  adminUsers: { data: null, timestamp: null, TTL: 5 * 60 * 1000 },
+};
+
+const isCacheValid = (cacheEntry) => {
+  return cacheEntry.data !== null &&
+         cacheEntry.timestamp !== null &&
+         (Date.now() - cacheEntry.timestamp) < cacheEntry.TTL;
+};
+
+// --- VALIDATION SCHEMAS ---
+const TriggerScraperSchema = z.object({
+  collection_id: z.enum(['eu', 'tr', 'us'], { errorMap: () => ({ message: 'Invalid region' }) }),
+  urls: z.array(z.string().url('Invalid URL format')).min(1, 'At least one URL required').max(50, 'Maximum 50 URLs allowed'),
+  options: z.object({}).optional(),
+});
+
+const TriggerNewsAPISchema = z.object({
+  keywords: z.array(z.string().min(1)).max(20, 'Maximum 20 keywords').optional(),
+  time_range: z.enum(['last_24_hours', 'last_7_days', 'last_30_days']).optional(),
+  max_results: z.number().int().min(1).max(100).optional(),
+});
+
+const UserPreferencesSchema = z.object({
+  scraperConfig: z.any().optional(),
+  feedSettings: z.object({
+    defaultRegion: z.enum(['eu', 'tr', 'us']).optional(),
+    autoRefresh: z.boolean().optional(),
+  }).optional(),
+});
+
+// --- RATE LIMITERS ---
+const scraperLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // Max 5 scraper triggers per 15 minutes
+  keyGenerator: (req) => req.user.email,
+  message: 'Too many scraper requests. Please try again later.'
+});
+
+const newsAPILimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // Max 10 API fetches per 15 minutes
+  keyGenerator: (req) => req.user.email,
+  message: 'Too many API requests. Please try again later.'
+});
 
 // --- HELPER FUNCTIONS ---
 
@@ -42,22 +93,33 @@ const hashEmail = (email) => {
 };
 
 /**
- * Load allowed users from GCS config
+ * Load allowed users from GCS config (WITH CACHING)
  */
 const loadAllowedUsers = async () => {
+  // Check cache first
+  if (isCacheValid(CACHE.allowedUsers)) {
+    return CACHE.allowedUsers.data;
+  }
+
   try {
     const bucket = storage.bucket(BUCKET_NAME);
     const file = bucket.file(`${CONFIG_FOLDER}allowed_users.json`);
     const [exists] = await file.exists();
-    
+
     if (!exists) {
       console.warn('allowed_users.json not found in GCS, using fallback list');
       return FALLBACK_ALLOWED_EMAILS;
     }
-    
+
     const [content] = await file.download();
     const config = JSON.parse(content.toString());
-    return config.allowed_users || FALLBACK_ALLOWED_EMAILS;
+    const users = config.allowed_users || FALLBACK_ALLOWED_EMAILS;
+
+    // Update cache
+    CACHE.allowedUsers.data = users;
+    CACHE.allowedUsers.timestamp = Date.now();
+
+    return users;
   } catch (error) {
     console.error('Error loading allowed users from GCS:', error);
     return FALLBACK_ALLOWED_EMAILS;
@@ -65,22 +127,33 @@ const loadAllowedUsers = async () => {
 };
 
 /**
- * Load admin users from GCS config
+ * Load admin users from GCS config (WITH CACHING)
  */
 const loadAdminUsers = async () => {
+  // Check cache first
+  if (isCacheValid(CACHE.adminUsers)) {
+    return CACHE.adminUsers.data;
+  }
+
   try {
     const bucket = storage.bucket(BUCKET_NAME);
     const file = bucket.file(`${CONFIG_FOLDER}admin_users.json`);
     const [exists] = await file.exists();
-    
+
     if (!exists) {
       console.warn('admin_users.json not found in GCS');
       return [];
     }
-    
+
     const [content] = await file.download();
     const config = JSON.parse(content.toString());
-    return config.admin_users || [];
+    const admins = config.admin_users || [];
+
+    // Update cache
+    CACHE.adminUsers.data = admins;
+    CACHE.adminUsers.timestamp = Date.now();
+
+    return admins;
   } catch (error) {
     console.error('Error loading admin users from GCS:', error);
     return [];
@@ -93,6 +166,39 @@ const loadAdminUsers = async () => {
 const isAdmin = async (email) => {
   const adminUsers = await loadAdminUsers();
   return adminUsers.includes(email);
+};
+
+/**
+ * Write audit log entry
+ */
+const writeAuditLog = async (action, user, metadata = {}) => {
+  try {
+    const timestamp = new Date().toISOString();
+    const date = timestamp.split('T')[0];
+    const logEntry = {
+      timestamp,
+      action,
+      user,
+      ...metadata
+    };
+
+    const logFile = storage.bucket(BUCKET_NAME).file(
+      `${AUDIT_LOG_FOLDER}${date}/audit.jsonl`
+    );
+
+    // Append to log file
+    await logFile.save(JSON.stringify(logEntry) + '\n', {
+      resumable: false,
+      contentType: 'application/x-ndjson',
+      metadata: {
+        contentType: 'application/x-ndjson',
+        metadata: { appendMode: 'true' }
+      }
+    });
+  } catch (error) {
+    console.error('Error writing audit log:', error);
+    // Don't throw - audit logging shouldn't break the request
+  }
 };
 
 app.use(express.json());
@@ -186,33 +292,40 @@ app.get('/api/user/preferences', async (req, res) => {
 // PUT /api/user/preferences - Save user preferences to GCS
 app.put('/api/user/preferences', async (req, res) => {
   try {
+    // Validate input
+    const validated = UserPreferencesSchema.parse(req.body);
+
     const emailHash = hashEmail(req.user.email);
     const bucket = storage.bucket(BUCKET_NAME);
     const file = bucket.file(`${USER_PREFERENCES_FOLDER}${emailHash}/preferences.json`);
-    
-    // Check if preferences already exist to preserve createdAt
-    let existingPrefs = {};
+
+    // Check if preferences already exist to preserve createdAt and version
+    let existingPrefs = { version: 0 };
     const [exists] = await file.exists();
     if (exists) {
       const [content] = await file.download();
       existingPrefs = JSON.parse(content.toString());
     }
-    
+
     const preferences = {
       email: req.user.email,
-      scraperConfig: req.body.scraperConfig || existingPrefs.scraperConfig,
-      feedSettings: req.body.feedSettings || existingPrefs.feedSettings,
+      scraperConfig: validated.scraperConfig !== undefined ? validated.scraperConfig : existingPrefs.scraperConfig,
+      feedSettings: validated.feedSettings !== undefined ? validated.feedSettings : existingPrefs.feedSettings,
       createdAt: existingPrefs.createdAt || new Date().toISOString(),
-      lastUpdated: new Date().toISOString()
+      lastUpdated: new Date().toISOString(),
+      version: (existingPrefs.version || 0) + 1
     };
-    
+
     await file.save(JSON.stringify(preferences, null, 2), {
       contentType: 'application/json'
     });
-    
+
     console.log(`Saved preferences for ${req.user.email} to ${USER_PREFERENCES_FOLDER}${emailHash}/preferences.json`);
     res.json(preferences);
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: 'Invalid input', details: error.errors });
+    }
     console.error('Error saving user preferences:', error);
     res.status(500).json({ error: error.message });
   }
@@ -233,17 +346,17 @@ app.get('/api/config/allowed-users', async (req, res) => {
   }
 });
 
-// GET /api/config/admin-users - Get admin users (admin only)
+// GET /api/config/admin-users - Get current user's admin status (NOT the full admin list)
 app.get('/api/config/admin-users', async (req, res) => {
-  if (!req.user.isAdmin) {
-    return res.status(403).json({ error: 'Admin access required' });
-  }
-  
   try {
-    const adminUsers = await loadAdminUsers();
-    res.json({ admin_users: adminUsers });
+    // Only return the current user's admin status, not the full list
+    // This prevents exposing who the admins are for security reasons
+    res.json({
+      email: req.user.email,
+      isAdmin: req.user.isAdmin
+    });
   } catch (error) {
-    console.error('Error loading admin users:', error);
+    console.error('Error checking admin status:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -502,14 +615,25 @@ app.get('/api/news', async (req, res) => {
 });
 
 // POST /api/trigger-scraper
-app.post('/api/trigger-scraper', async (req, res) => {
+app.post('/api/trigger-scraper', scraperLimiter, async (req, res) => {
   if (!SCRAPING_TOPIC) {
     return res.status(500).json({ error: 'SCRAPING_REQUEST_TOPIC not configured' });
   }
 
   try {
+    // Validate input
+    const validated = TriggerScraperSchema.parse(req.body);
+
+    // Validate URLs are http/https only
+    for (const url of validated.urls) {
+      const parsed = new URL(url);
+      if (!['http:', 'https:'].includes(parsed.protocol)) {
+        return res.status(400).json({ error: 'Only HTTP and HTTPS URLs are allowed' });
+      }
+    }
+
     const payload = {
-      ...req.body,
+      ...validated,
       triggered_by: req.user.email  // Add user email to track who triggered the scrape
     };
     console.log(`Triggering scraper for ${payload.collection_id} by ${req.user.email}:`, payload);
@@ -518,15 +642,25 @@ app.post('/api/trigger-scraper', async (req, res) => {
     const dataBuffer = Buffer.from(JSON.stringify(payload));
     const messageId = await topicPath.publishMessage({ data: dataBuffer });
 
+    // Write audit log
+    await writeAuditLog('trigger_scraper', req.user.email, {
+      region: payload.collection_id,
+      urlCount: payload.urls.length,
+      messageId
+    });
+
     console.log(`✅ Published message ${messageId} to topic ${SCRAPING_TOPIC}`);
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       messageId,
       region: payload.collection_id,
-      sourcesCount: payload.urls ? payload.urls.length : 0,
+      sourcesCount: payload.urls.length,
       triggeredBy: req.user.email
     });
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: 'Invalid input', details: error.errors });
+    }
     console.error('Scraper trigger error:', error);
     res.status(500).json({ error: error.message });
   }
@@ -535,12 +669,15 @@ app.post('/api/trigger-scraper', async (req, res) => {
 // POST /api/trigger-news-api
 const NEWS_API_TOPIC = process.env.NEWS_API_REQUEST_TOPIC || 'news-api-requests';
 
-app.post('/api/trigger-news-api', async (req, res) => {
+app.post('/api/trigger-news-api', newsAPILimiter, async (req, res) => {
   try {
+    // Validate input
+    const validated = TriggerNewsAPISchema.parse(req.body);
+
     const payload = {
-      keywords: req.body.keywords || ['fenerbahce', 'galatasaray', 'tedesco'],
-      time_range: req.body.time_range || 'last_24_hours',
-      max_results: req.body.max_results || 50,
+      keywords: validated.keywords || ['fenerbahce', 'galatasaray', 'tedesco'],
+      time_range: validated.time_range || 'last_24_hours',
+      max_results: validated.max_results || 50,
       triggered_by: req.user.email
     };
     console.log(`Triggering News API fetch by ${req.user.email}:`, payload);
@@ -549,14 +686,25 @@ app.post('/api/trigger-news-api', async (req, res) => {
     const dataBuffer = Buffer.from(JSON.stringify(payload));
     const messageId = await topicPath.publishMessage({ data: dataBuffer });
 
+    // Write audit log
+    await writeAuditLog('trigger_news_api', req.user.email, {
+      keywords: payload.keywords,
+      time_range: payload.time_range,
+      max_results: payload.max_results,
+      messageId
+    });
+
     console.log(`✅ Published message ${messageId} to topic ${NEWS_API_TOPIC}`);
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       messageId,
       keywords: payload.keywords,
       triggeredBy: req.user.email
     });
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: 'Invalid input', details: error.errors });
+    }
     console.error('News API trigger error:', error);
     res.status(500).json({ error: error.message });
   }
