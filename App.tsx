@@ -120,14 +120,36 @@ const App: React.FC = () => {
       if (window.google && !user) {
         window.google.accounts.id.initialize({
           client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
-          callback: (response: any) => {
+          callback: async (response: any) => {
             const credential = response.credential;
-            setToken(credential);
             const payload = JSON.parse(atob(credential.split('.')[1]));
-            setUser(payload);
+
+            // SECURITY: Verify with backend before allowing access
+            try {
+              const userResponse = await fetch('/api/user', {
+                headers: { 'Authorization': `Bearer ${credential}` }
+              });
+
+              if (!userResponse.ok) {
+                // User not allowed - show error
+                alert(`Access Denied: Your email (${payload.email}) is not in the allowed users list. Please contact the administrator.`);
+                setToken(null);
+                setUser(null);
+                return;
+              }
+
+              // User is allowed - proceed with login
+              setToken(credential);
+              setUser(payload);
+            } catch (error) {
+              console.error('Authentication error:', error);
+              alert('Authentication failed. Please try again.');
+              setToken(null);
+              setUser(null);
+            }
           }
         });
-        
+
         const buttonDiv = document.getElementById("google-signin-button");
         if (buttonDiv) {
           window.google.accounts.id.renderButton(
