@@ -44,7 +44,8 @@ const App: React.FC = () => {
   const [selectedRegion, setSelectedRegion] = useState<SourceRegion>('tr');
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
-  const [activeTab, setActiveTab] = useState<'feed' | 'scraper'>('feed');
+  const [activeTab, setActiveTab] = useState<'feed' | 'scraper' | 'fetcher'>('feed');
+  const [fetcherLoading, setFetcherLoading] = useState(false);
   const [showTagSettings, setShowTagSettings] = useState(false);
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [sourceTypeFilter, setSourceTypeFilter] = useState<{ scraped: boolean; api: boolean }>({ scraped: true, api: true });
@@ -340,6 +341,30 @@ const App: React.FC = () => {
                 }`}
               >
                 Scraper
+              </button>
+              <button
+                onClick={async () => {
+                  setFetcherLoading(true);
+                  try {
+                    const res = await fetch('/api/trigger-news-api', {
+                      method: 'POST',
+                      headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    if (!res.ok) throw new Error('Failed to trigger fetcher');
+                    alert('Fetcher triggered successfully!');
+                  } catch (e) {
+                    alert('Failed to trigger fetcher.');
+                  } finally {
+                    setFetcherLoading(false);
+                  }
+                }}
+                className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors flex items-center gap-2 ${
+                  fetcherLoading ? 'bg-blue-900 text-blue-300' : 'text-slate-400 hover:text-white'
+                }`}
+                disabled={fetcherLoading}
+              >
+                Fetcher
+                {fetcherLoading && <span className="ml-1 animate-spin">⏳</span>}
               </button>
             </div>
           </div>
