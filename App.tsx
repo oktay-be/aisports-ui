@@ -57,8 +57,9 @@ const App: React.FC = () => {
   const [preferences, setPreferences] = useState<UserPreferences>(DEFAULT_PREFERENCES);
   const [showUserMenu, setShowUserMenu] = useState(false);
 
-  // Background prefetch state
-  const [prefetchedData, setPrefetchedData] = useState<{ [key: string]: NewsEntry[] }>({});
+  // Smart cache: stores articles by region/feedFilter/date
+  // Structure: { "tr_my_2025-12-16": [...articles], "tr_my_2025-12-15": [...articles] }
+  const [articleCache, setArticleCache] = useState<{ [cacheKey: string]: NewsEntry[] }>({});
   const [isPrefetching, setIsPrefetching] = useState(false);
   const [prefetchComplete, setPrefetchComplete] = useState(false);
 
@@ -247,16 +248,28 @@ const App: React.FC = () => {
         // Prefetch for the current region
         const data = await fetchNews(selectedRegion, undefined, token, triggeredBy, historicalDepth);
 
-        // Store in cache with key based on region and filter
-        const cacheKey = `${selectedRegion}_${feedFilter}_${historicalDepth}d`;
-        setPrefetchedData(prev => ({ ...prev, [cacheKey]: data }));
+        // Split data by date and store in cache
+        const newCache: { [key: string]: NewsEntry[] } = {};
+        data.forEach(article => {
+          const articleDate = article.published_date ?
+            new Date(article.published_date).toISOString().split('T')[0] :
+            getTodayDate();
+          const cacheKey = `${selectedRegion}_${feedFilter}_${articleDate}`;
 
-        console.log(`✅ Prefetch complete: ${data.length} articles loaded for last ${historicalDepth} days`);
+          if (!newCache[cacheKey]) {
+            newCache[cacheKey] = [];
+          }
+          newCache[cacheKey].push(article);
+        });
+
+        setArticleCache(prev => ({ ...prev, ...newCache }));
+
+        const dateCount = Object.keys(newCache).length;
+        console.log(`✅ Prefetch complete: ${data.length} articles cached across ${dateCount} dates`);
         setPrefetchComplete(true);
 
-        // Show success toast briefly
         setTimeout(() => {
-          console.log(`💾 Cached ${data.length} articles ready for fast access`);
+          console.log(`💾 Cache ready: ${Object.keys(newCache).join(', ')}`);
         }, 500);
       } catch (error) {
         console.error('❌ Prefetch failed:', error);
@@ -315,8 +328,32 @@ const App: React.FC = () => {
       } else {
         triggeredBy = feedFilter; // Specific user email
       }
-      
+
+      // 🚀 SMART CACHE: Check if we already have this exact date cached
+      if (date) {
+        const cacheKey = `${selectedRegion}_${feedFilter}_${date}`;
+
+        if (articleCache[cacheKey]) {
+          // ⚡ INSTANT! Data already cached
+          console.log(`⚡ Cache HIT for ${date} - instant load! (${articleCache[cacheKey].length} articles)`);
+          setEntries(articleCache[cacheKey]);
+          setLastUpdated(new Date());
+          setLoading(false);
+          return;
+        }
+      }
+
+      // 🌐 Cache MISS - fetch from API
+      console.log(`🌐 Cache MISS for ${date || 'today'} - fetching from API...`);
       const data = await fetchNews(selectedRegion, date, token, triggeredBy);
+
+      // ✅ Add fetched data to cache
+      if (date && data.length > 0) {
+        const cacheKey = `${selectedRegion}_${feedFilter}_${date}`;
+        setArticleCache(prev => ({ ...prev, [cacheKey]: data }));
+        console.log(`💾 Cached ${data.length} articles for ${date}`);
+      }
+
       setEntries(data);
       setLastUpdated(new Date());
     } catch (e) {
@@ -485,7 +522,10 @@ const App: React.FC = () => {
              <span className="text-xs text-slate-500 hidden md:inline" title={lastUpdated.toLocaleString()}>
                Updated: {lastUpdated.toLocaleTimeString()}
              </span>
-             <button onClick={() => loadData()} className="p-2 hover:bg-slate-800 rounded-full transition-colors text-slate-400 hover:text-white" title="Refresh now">
+             <button onClick={() => {
+               const isSingleDay = filters.startDate && filters.endDate && filters.startDate === filters.endDate;
+               loadData(isSingleDay ? filters.startDate : undefined);
+             }} className="p-2 hover:bg-slate-800 rounded-full transition-colors text-slate-400 hover:text-white" title="Refresh now">
                <RefreshIcon />
              </button>
              
@@ -581,7 +621,7 @@ const App: React.FC = () => {
           <ScraperTrigger token={token || undefined} />
         ) : (
           <>
-        {/* Prefetch Indicator */}
+        {/* Prefetch & Cache Indicator */}
         {isPrefetching && (
           <div className="mb-4 p-3 bg-blue-900/20 border border-blue-700/30 rounded-lg flex items-center gap-3">
             <svg className="animate-spin h-4 w-4 text-blue-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -590,6 +630,13 @@ const App: React.FC = () => {
             </svg>
             <span className="text-sm text-blue-300">
               Loading last {import.meta.env.VITE_HISTORICAL_DEPTH || '3'} days of data in background...
+            </span>
+          </div>
+        )}
+        {!isPrefetching && Object.keys(articleCache).length > 0 && (
+          <div className="mb-4 p-2 bg-green-900/10 border border-green-700/20 rounded-lg">
+            <span className="text-xs text-green-400">
+              💾 {Object.keys(articleCache).length} dates cached (instant loading)
             </span>
           </div>
         )}
