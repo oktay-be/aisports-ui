@@ -881,21 +881,18 @@ const MOCK_ARTICLES: ProcessedArticle[] = [
 
 export const fetchNews = async (
   region: SourceRegion = 'eu',
-  date?: string,
+  startDate?: string,
+  endDate?: string,
   token?: string,
-  triggeredBy?: string,
   lastNDays?: number
 ): Promise<NewsEntry[]> => {
     try {
       let url = `/api/news?region=${region}`;
-      if (date) {
-        url += `&date=${date}`;
+      if (startDate && endDate) {
+        url += `&startDate=${startDate}&endDate=${endDate}`;
       }
       if (lastNDays) {
         url += `&last_n_days=${lastNDays}`;
-      }
-      if (triggeredBy) {
-        url += `&triggered_by=${encodeURIComponent(triggeredBy)}`;
       }
 
       const headers: HeadersInit = {};
@@ -910,7 +907,7 @@ export const fetchNews = async (
            throw new Error("Authentication failed");
         }
         // Return empty array instead of mock data to avoid showing wrong region data
-        console.warn(`No data found for ${region}${date ? ` on ${date}` : ''}`);
+        console.warn(`No data found for ${region}${startDate ? ` for ${startDate} - ${endDate}` : ''}`);
         return [];
       }
       const articles: ProcessedArticle[] = await response.json();
