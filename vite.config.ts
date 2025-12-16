@@ -26,6 +26,9 @@ const gcsProxyPlugin = () => {
       // Disable SSL verification for development (WSL certificate issue)
       if (envConfig.NODE_TLS_REJECT_UNAUTHORIZED === '0') {
         process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+        // Also disable gRPC SSL verification for Pub/Sub
+        process.env.GRPC_SSL_CIPHER_SUITES = 'HIGH';
+        process.env.NODE_OPTIONS = '--tls-min-v1.0';
       }
 
       // Resolve key file path relative to the .env file location
