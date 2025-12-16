@@ -879,16 +879,25 @@ const MOCK_ARTICLES: ProcessedArticle[] = [
     }
 ];
 
-export const fetchNews = async (region: SourceRegion = 'eu', date?: string, token?: string, triggeredBy?: string): Promise<NewsEntry[]> => {
+export const fetchNews = async (
+  region: SourceRegion = 'eu',
+  date?: string,
+  token?: string,
+  triggeredBy?: string,
+  lastNDays?: number
+): Promise<NewsEntry[]> => {
     try {
       let url = `/api/news?region=${region}`;
       if (date) {
         url += `&date=${date}`;
       }
+      if (lastNDays) {
+        url += `&last_n_days=${lastNDays}`;
+      }
       if (triggeredBy) {
         url += `&triggered_by=${encodeURIComponent(triggeredBy)}`;
       }
-      
+
       const headers: HeadersInit = {};
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
@@ -905,7 +914,7 @@ export const fetchNews = async (region: SourceRegion = 'eu', date?: string, toke
         return [];
       }
       const articles: ProcessedArticle[] = await response.json();
-      
+
       return articles.map((article, index) => ({
         ...article,
         id: `entry-${region}-${index}`,

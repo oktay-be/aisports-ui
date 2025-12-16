@@ -57,6 +57,11 @@ const App: React.FC = () => {
   const [preferences, setPreferences] = useState<UserPreferences>(DEFAULT_PREFERENCES);
   const [showUserMenu, setShowUserMenu] = useState(false);
 
+  // Background prefetch state
+  const [prefetchedData, setPrefetchedData] = useState<{ [key: string]: NewsEntry[] }>({});
+  const [isPrefetching, setIsPrefetching] = useState(false);
+  const [prefetchComplete, setPrefetchComplete] = useState(false);
+
   // Get today's date in YYYY-MM-DD format
   const getTodayDate = () => new Date().toISOString().split('T')[0];
 
@@ -219,6 +224,50 @@ const App: React.FC = () => {
 
     loadUserInfo();
   }, [token]);
+
+  // Background prefetch historical data after login
+  useEffect(() => {
+    if (!token || !user || prefetchComplete) return;
+
+    const prefetchHistoricalData = async () => {
+      setIsPrefetching(true);
+      const historicalDepth = parseInt(import.meta.env.VITE_HISTORICAL_DEPTH || '3');
+
+      console.log(`📦 Prefetching last ${historicalDepth} days of data in background...`);
+
+      try {
+        // Determine triggered_by filter
+        let triggeredBy: string | undefined;
+        if (feedFilter === 'my') {
+          triggeredBy = user?.email;
+        } else if (feedFilter !== 'all') {
+          triggeredBy = feedFilter;
+        }
+
+        // Prefetch for the current region
+        const data = await fetchNews(selectedRegion, undefined, token, triggeredBy, historicalDepth);
+
+        // Store in cache with key based on region and filter
+        const cacheKey = `${selectedRegion}_${feedFilter}_${historicalDepth}d`;
+        setPrefetchedData(prev => ({ ...prev, [cacheKey]: data }));
+
+        console.log(`✅ Prefetch complete: ${data.length} articles loaded for last ${historicalDepth} days`);
+        setPrefetchComplete(true);
+
+        // Show success toast briefly
+        setTimeout(() => {
+          console.log(`💾 Cached ${data.length} articles ready for fast access`);
+        }, 500);
+      } catch (error) {
+        console.error('❌ Prefetch failed:', error);
+      } finally {
+        setIsPrefetching(false);
+      }
+    };
+
+    // Start prefetch in background (don't block UI)
+    setTimeout(prefetchHistoricalData, 100);
+  }, [token, user, selectedRegion, feedFilter, prefetchComplete]);
 
   // Initial Fetch & Date Filter Watch - fetch whenever dates or region change
   useEffect(() => {
@@ -532,6 +581,19 @@ const App: React.FC = () => {
           <ScraperTrigger token={token || undefined} />
         ) : (
           <>
+        {/* Prefetch Indicator */}
+        {isPrefetching && (
+          <div className="mb-4 p-3 bg-blue-900/20 border border-blue-700/30 rounded-lg flex items-center gap-3">
+            <svg className="animate-spin h-4 w-4 text-blue-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span className="text-sm text-blue-300">
+              Loading last {import.meta.env.VITE_HISTORICAL_DEPTH || '3'} days of data in background...
+            </span>
+          </div>
+        )}
+
         {/* Controls & Analysis Bar */}
         <div className="mb-8 space-y-6">
           <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between bg-slate-900 p-4 rounded-xl border border-slate-800">
