@@ -393,7 +393,7 @@ app.get('/api/config/news-api', async (req, res) => {
       return res.json({
         default_keywords: ['fenerbahce', 'galatasaray', 'tedesco'],
         default_time_range: 'last_24_hours',
-        default_max_results: 50,
+        default_max_results: 100,
         available_time_ranges: ['last_24_hours', 'last_7_days', 'last_30_days']
       });
     }
