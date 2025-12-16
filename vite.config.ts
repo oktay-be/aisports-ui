@@ -434,8 +434,27 @@ const gcsProxyPlugin = () => {
           }
 
           console.log(`📊 Total articles: ${allArticles.length}`);
+
+          // --- DEDUPLICATE BY URL ---
+          const seenUrls = new Set<string>();
+          const uniqueArticles: any[] = [];
+          for (const article of allArticles) {
+            const url = article.original_url || article.url;
+            if (url && !seenUrls.has(url)) {
+              seenUrls.add(url);
+              uniqueArticles.push(article);
+            }
+          }
+
+          if (uniqueArticles.length === 0) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: 'No data found' }));
+            return;
+          }
+
+          console.log(`Returning ${uniqueArticles.length} unique articles (${allArticles.length - uniqueArticles.length} duplicates removed)`);
           res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify(allArticles));
+          res.end(JSON.stringify(uniqueArticles));
         } catch (error: any) {
           console.error('GCS Proxy Request Error:', error);
           res.statusCode = 500;
