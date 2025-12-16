@@ -182,18 +182,32 @@ const gcsProxyPlugin = () => {
         }
 
         try {
+          // Verify authentication
+          const authHeader = req.headers.authorization as string | undefined;
+          const user = await verifyAuth(authHeader);
+
+          if (!user) {
+            res.statusCode = 401;
+            res.end(JSON.stringify({ error: 'Unauthorized' }));
+            return;
+          }
+
           const url = new URL(req.url || '', `http://${req.headers.host}`);
           const region = url.searchParams.get('region') || 'eu';
           const dateParam = url.searchParams.get('date'); // Expecting YYYY-MM-DD
           const latestOnly = url.searchParams.get('latest') === 'true'; // Get only latest run
           const lastNDays = parseInt(url.searchParams.get('last_n_days') || '0'); // Get last N days
+          const triggeredByFilter = url.searchParams.get('triggered_by'); // 'me', 'all', or specific email
 
-          let prefix = `news_data/batch_processing/${region}/`;
-          
+          let allArticles: any[] = [];
+
+          // --- FETCH FROM SCRAPED DATA (batch_processing path) ---
+          let scraperPrefix = `news_data/batch_processing/${region}/`;
+
           if (dateParam) {
             // Structure: news_data/batch_processing/{region}/{YYYY-MM}/{YYYY-MM-DD}/
             const [year, month] = dateParam.split('-');
-            prefix = `news_data/batch_processing/${region}/${year}-${month}/${dateParam}/`;
+            scraperPrefix = `news_data/batch_processing/${region}/${year}-${month}/${dateParam}/`;
             console.log(`Targeting specific date: ${dateParam}`);
           } else if (lastNDays > 0) {
             // Get data from last N days (live data mode)
@@ -203,19 +217,19 @@ const gcsProxyPlugin = () => {
             const now = new Date();
             const year = now.getFullYear();
             const month = String(now.getMonth() + 1).padStart(2, '0');
-            prefix = `news_data/batch_processing/${region}/${year}-${month}/`;
+            scraperPrefix = `news_data/batch_processing/${region}/${year}-${month}/`;
             console.log(`Defaulting to current month: ${year}-${month}`);
           }
-          
-          console.log(`Looking for files in ${bucketName} with prefix ${prefix}...`);
 
-          const [files] = await storage.bucket(bucketName).getFiles({
-            prefix: prefix
+          console.log(`Looking for scraped files in ${bucketName} with prefix ${scraperPrefix}...`);
+
+          const [scraperFiles] = await storage.bucket(bucketName).getFiles({
+            prefix: scraperPrefix
           });
 
           // Filter for stage 2 prediction results
-          let resultFiles = files.filter(f => 
-            f.name.includes('stage2_deduplication/results') && 
+          let resultFiles = scraperFiles.filter(f =>
+            f.name.includes('stage2_deduplication/results') &&
             f.name.endsWith('predictions.jsonl')
           );
 
@@ -233,60 +247,84 @@ const gcsProxyPlugin = () => {
             });
           }
 
-          if (resultFiles.length === 0) {
-            console.log('No files found.');
-            res.statusCode = 404;
-            res.end(JSON.stringify({ error: 'No data found' }));
-            return;
+          // Apply triggered_by filter if specified
+          if (triggeredByFilter && triggeredByFilter !== 'all') {
+            const targetEmail = triggeredByFilter === 'me' ? user.email : triggeredByFilter;
+
+            // Non-admins can only filter by 'me'
+            if (triggeredByFilter !== 'me' && !user.isAdmin) {
+              res.statusCode = 403;
+              res.end(JSON.stringify({ error: 'Admin access required to view other users\' feeds' }));
+              return;
+            }
+
+            // Filter result files by checking metadata.json in the same run folder
+            const filteredFiles = [];
+            for (const file of resultFiles) {
+              try {
+                const runFolderMatch = file.name.match(/(news_data\/batch_processing\/[^/]+\/\d{4}-\d{2}\/\d{4}-\d{2}-\d{2}\/run_[^/]+)\//);
+                if (runFolderMatch) {
+                  const metadataPath = `${runFolderMatch[1]}/metadata.json`;
+                  const metadataFile = storage.bucket(bucketName).file(metadataPath);
+                  const [metadataExists] = await metadataFile.exists();
+
+                  if (metadataExists) {
+                    const [metadataContent] = await metadataFile.download();
+                    const metadata = JSON.parse(metadataContent.toString());
+                    const triggeredBy = metadata.triggered_by || 'system';
+
+                    if (triggeredBy === targetEmail) {
+                      filteredFiles.push(file);
+                    }
+                  } else {
+                    if (targetEmail === 'system') {
+                      filteredFiles.push(file);
+                    }
+                  }
+                }
+              } catch (err: any) {
+                console.warn(`Error checking metadata for ${file.name}:`, err.message);
+                if (triggeredByFilter === 'all' || !triggeredByFilter) {
+                  filteredFiles.push(file);
+                }
+              }
+            }
+            resultFiles = filteredFiles;
           }
 
           // Sort by name descending (latest first) - file names include timestamps
           resultFiles.sort((a, b) => b.name.localeCompare(a.name));
 
-          let filesToProcess = [];
+          let filesToProcess = latestOnly ? (resultFiles.length > 0 ? [resultFiles[0]] : []) : resultFiles;
 
-          if (latestOnly) {
-            // Get only the most recent file
-            filesToProcess = [resultFiles[0]];
-            console.log(`Fetching latest file only: ${filesToProcess[0].name}`);
-          } else if (dateParam) {
-            // If a specific date is selected, we get ALL runs for that day
-            filesToProcess = resultFiles;
-            console.log(`Found ${filesToProcess.length} runs for date ${dateParam}`);
-          } else {
-            // Default behavior: Get ALL files from the selected range
-            filesToProcess = resultFiles;
-            console.log(`Found ${filesToProcess.length} files to process`);
-          }
-
-          let allArticles: any[] = [];
-
+          // Process scraped files
           for (const file of filesToProcess) {
             console.log(`Downloading file: ${file.name}`);
             const [content] = await file.download();
-            
+
             const fileContent = content.toString();
             const lines = fileContent.split('\n').filter(line => line.trim());
-            
+
             for (const line of lines) {
               try {
                 const json = JSON.parse(line);
-                
+                let articlesToAdd: any[] = [];
+
                 // Case 1: Vertex AI Batch Response (nested JSON in candidates)
-                if (json.response && json.response.candidates && json.response.candidates[0].content && json.response.candidates[0].content.parts) {
+                if (json.response?.candidates?.[0]?.content?.parts?.[0]?.text) {
                   const text = json.response.candidates[0].content.parts[0].text;
                   // Clean markdown code blocks if present
                   const cleanText = text.replace(/```json\n?|\n?```/g, '');
                   try {
                     const parsedInner = JSON.parse(cleanText);
                     if (parsedInner.processed_articles) {
-                      allArticles = [...allArticles, ...parsedInner.processed_articles];
+                      articlesToAdd = parsedInner.processed_articles;
                     } else if (parsedInner.consolidated_articles) {
-                      allArticles = [...allArticles, ...parsedInner.consolidated_articles];
+                      articlesToAdd = parsedInner.consolidated_articles;
                     } else if (Array.isArray(parsedInner)) {
-                      allArticles = [...allArticles, ...parsedInner];
+                      articlesToAdd = parsedInner;
                     } else if (parsedInner.title) {
-                       allArticles.push(parsedInner);
+                      articlesToAdd = [parsedInner];
                     }
                   } catch (e) {
                     console.error('Error parsing inner JSON:', e);
@@ -294,24 +332,93 @@ const gcsProxyPlugin = () => {
                 }
                 // Case 2: Direct article object (flat JSONL)
                 else if (json.title && json.summary && json.original_url) {
-                   allArticles.push(json);
+                  articlesToAdd = [json];
                 }
                 // Case 3: List of articles
                 else if (Array.isArray(json)) {
-                   allArticles = [...allArticles, ...json];
+                  articlesToAdd = json;
                 }
                 // Case 4: Prediction wrapper
                 else if (json.prediction) {
-                   if (Array.isArray(json.prediction)) {
-                      allArticles = [...allArticles, ...json.prediction];
-                   } else {
-                      allArticles.push(json.prediction);
-                   }
+                  if (Array.isArray(json.prediction)) {
+                    articlesToAdd = json.prediction;
+                  } else {
+                    articlesToAdd = [json.prediction];
+                  }
+                }
+
+                // Add source_type: 'scraped' to each article
+                for (const article of articlesToAdd) {
+                  article.source_type = 'scraped';
+                  allArticles.push(article);
                 }
               } catch (err) {
                 console.error('Error parsing line in file ' + file.name, err);
               }
             }
+          }
+
+          // --- FETCH FROM API DATA (news_data/api path) ---
+          let apiPrefix = `news_data/api/`;
+
+          if (dateParam) {
+            const [year, month] = dateParam.split('-');
+            apiPrefix = `news_data/api/${year}-${month}/${dateParam}/`;
+          } else if (lastNDays > 0) {
+            // Keep broad prefix for N days lookup
+          } else {
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            apiPrefix = `news_data/api/${year}-${month}/`;
+          }
+
+          console.log(`Looking for API-fetched files in ${bucketName} with prefix ${apiPrefix}...`);
+
+          try {
+            const [apiFiles] = await storage.bucket(bucketName).getFiles({ prefix: apiPrefix });
+
+            // Filter for articles.json files
+            let apiResultFiles = apiFiles.filter(f => f.name.endsWith('articles.json'));
+
+            // If fetching last N days, filter by date
+            if (lastNDays > 0) {
+              const cutoffDate = new Date();
+              cutoffDate.setDate(cutoffDate.getDate() - lastNDays);
+
+              apiResultFiles = apiResultFiles.filter(f => {
+                const match = f.name.match(/(\d{4})-(\d{2})-(\d{2})/);
+                if (match) {
+                  const fileDate = new Date(match[0]);
+                  return fileDate >= cutoffDate;
+                }
+                return false;
+              });
+            }
+
+            // Sort by name descending (latest first)
+            apiResultFiles.sort((a, b) => b.name.localeCompare(a.name));
+
+            let apiFilesToProcess = latestOnly ? (apiResultFiles.length > 0 ? [apiResultFiles[0]] : []) : apiResultFiles;
+
+            // Process API files
+            for (const file of apiFilesToProcess) {
+              try {
+                const [content] = await file.download();
+                const data = JSON.parse(content.toString());
+
+                if (data.articles && Array.isArray(data.articles)) {
+                  for (const article of data.articles) {
+                    article.source_type = 'api';
+                    allArticles.push(article);
+                  }
+                }
+              } catch (err: any) {
+                console.error(`Error processing API file ${file.name}:`, err.message);
+              }
+            }
+          } catch (err: any) {
+            console.error('Error fetching API data:', err.message);
           }
 
           res.setHeader('Content-Type', 'application/json');
@@ -490,6 +597,58 @@ const gcsProxyPlugin = () => {
           }));
         } catch (error: any) {
           console.error('Admin users endpoint error:', error);
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: error.message }));
+        }
+      });
+
+      // GET /api/config/news-api - Get News API configuration
+      server.middlewares.use('/api/config/news-api', async (req, res, next) => {
+        if (req.method !== 'GET') {
+          return next();
+        }
+
+        try {
+          // Verify authentication
+          const authHeader = req.headers.authorization as string | undefined;
+          const user = await verifyAuth(authHeader);
+
+          if (!user) {
+            res.statusCode = 401;
+            res.end(JSON.stringify({ error: 'Unauthorized' }));
+            return;
+          }
+
+          if (!storage || !bucketName) {
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error: 'GCS not configured' }));
+            return;
+          }
+
+          // Load news API config from GCS
+          const bucket = storage.bucket(bucketName);
+          const file = bucket.file('config/news_api_config.json');
+          const [exists] = await file.exists();
+
+          if (!exists) {
+            // Return default config if file doesn't exist
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({
+              default_keywords: ['fenerbahce', 'galatasaray', 'tedesco'],
+              default_time_range: 'last_24_hours',
+              default_max_results: 50,
+              available_time_ranges: ['last_24_hours', 'last_7_days', 'last_30_days']
+            }));
+            return;
+          }
+
+          const [content] = await file.download();
+          const config = JSON.parse(content.toString());
+
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify(config));
+        } catch (error: any) {
+          console.error('News API config endpoint error:', error);
           res.statusCode = 500;
           res.end(JSON.stringify({ error: error.message }));
         }

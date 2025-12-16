@@ -368,9 +368,26 @@ const App: React.FC = () => {
                 onClick={async () => {
                   setFetcherLoading(true);
                   try {
+                    // Fetch config from GCS
+                    const configRes = await fetch('/api/config/news-api', {
+                      headers: { 'Authorization': `Bearer ${token}` }
+                    });
+
+                    if (!configRes.ok) throw new Error('Failed to load config');
+                    const config = await configRes.json();
+
+                    // Trigger with config values
                     const res = await fetch('/api/trigger-news-api', {
                       method: 'POST',
-                      headers: { 'Authorization': `Bearer ${token}` }
+                      headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                      },
+                      body: JSON.stringify({
+                        keywords: config.default_keywords,
+                        time_range: config.default_time_range,
+                        max_results: config.default_max_results
+                      })
                     });
                     if (!res.ok) throw new Error('Failed to trigger fetcher');
                     alert('Fetcher triggered successfully!');

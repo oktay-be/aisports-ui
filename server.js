@@ -205,11 +205,6 @@ app.use(express.json());
 
 // --- AUTH MIDDLEWARE ---
 const requireAuth = async (req, res, next) => {
-  // Allow public access to static files so the login page can load
-  if (!req.path.startsWith('/api/')) {
-    return next();
-  }
-
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'Missing or invalid Authorization header' });
@@ -357,6 +352,32 @@ app.get('/api/config/admin-users', async (req, res) => {
     });
   } catch (error) {
     console.error('Error checking admin status:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/config/news-api - Get News API configuration
+app.get('/api/config/news-api', async (req, res) => {
+  try {
+    const bucket = storage.bucket(BUCKET_NAME);
+    const file = bucket.file('config/news_api_config.json');
+    const [exists] = await file.exists();
+
+    if (!exists) {
+      // Return default config if file doesn't exist
+      return res.json({
+        default_keywords: ['fenerbahce', 'galatasaray', 'tedesco'],
+        default_time_range: 'last_24_hours',
+        default_max_results: 50,
+        available_time_ranges: ['last_24_hours', 'last_7_days', 'last_30_days']
+      });
+    }
+
+    const [content] = await file.download();
+    const config = JSON.parse(content.toString());
+    res.json(config);
+  } catch (error) {
+    console.error('Error loading news API config:', error);
     res.status(500).json({ error: error.message });
   }
 });
