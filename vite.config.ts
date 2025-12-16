@@ -6,6 +6,7 @@ import { PubSub } from '@google-cloud/pubsub';
 import { OAuth2Client } from 'google-auth-library';
 import dotenv from 'dotenv';
 import fs from 'fs';
+import grpc from '@grpc/grpc-js';
 
 // Custom plugin to proxy GCS requests and handle scraper triggers
 const gcsProxyPlugin = () => {
@@ -26,9 +27,6 @@ const gcsProxyPlugin = () => {
       // Disable SSL verification for development (WSL certificate issue)
       if (envConfig.NODE_TLS_REJECT_UNAUTHORIZED === '0') {
         process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-        // Also disable gRPC SSL verification for Pub/Sub
-        process.env.GRPC_SSL_CIPHER_SUITES = 'HIGH';
-        process.env.NODE_OPTIONS = '--tls-min-v1.0';
       }
 
       // Resolve key file path relative to the .env file location
@@ -43,11 +41,19 @@ const gcsProxyPlugin = () => {
       scrapingTopic = envConfig.SCRAPING_REQUEST_TOPIC || 'scraping-requests';
       googleClientId = envConfig.VITE_GOOGLE_CLIENT_ID;
 
-      // Initialize Pub/Sub client
-      pubsub = new PubSub({
+      // Initialize Pub/Sub client with SSL workaround for WSL
+      const pubsubConfig: any = {
         projectId: projectId,
         keyFilename: keyFilename,
-      });
+      };
+
+      // For WSL development, use custom gRPC settings to bypass SSL certificate issues
+      if (envConfig.NODE_TLS_REJECT_UNAUTHORIZED === '0') {
+        pubsubConfig.grpc = grpc;
+        pubsubConfig.sslCreds = grpc.credentials.createInsecure();
+      }
+
+      pubsub = new PubSub(pubsubConfig);
 
       // Initialize OAuth2 client for JWT verification
       authClient = new OAuth2Client(googleClientId);
