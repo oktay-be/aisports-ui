@@ -1,9 +1,19 @@
 name: Deploy UI to Cloud Run
 
+# Required GitHub Actions Variables:
+# - VITE_GOOGLE_CLIENT_ID: Google OAuth Client ID
+# - VITE_HISTORICAL_DEPTH: Number of days of historical data to prefetch on login (default: 3)
+#   To set: gh variable set VITE_HISTORICAL_DEPTH --body "3" --repo <your-repo>
+#
+# Other required variables:
+# - GCP_PROJECT_NUMBER, GCP_SERVICE_ACCOUNT, WIF_POOL_ID, WIF_PROVIDER_ID
+# - GOOGLE_CLOUD_PROJECT, GCS_BUCKET_NAME, SCRAPING_REQUEST_TOPIC, REGION
+
 on:
   push:
     branches:
       - main
+      - dev
     paths:
       - '**/*.tsx'
       - '**/*.ts'
@@ -42,6 +52,7 @@ jobs:
       run: npm run build
       env:
         VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
+        VITE_HISTORICAL_DEPTH: ${{ vars.VITE_HISTORICAL_DEPTH }}
 
     - name: Authenticate to Google Cloud (Workload Identity Federation)
       uses: google-github-actions/auth@v2

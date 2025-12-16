@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { NewsEntry, PostStatus, FilterState, GeminiAnalysis, SourceRegion } from './types';
 import { fetchNews } from './services/dataService';
 import { ScraperTrigger } from './components/ScraperTrigger';
+import { loadPreferences, savePreferences, UserPreferences, DEFAULT_PREFERENCES } from './services/userPreferencesService';
 
 // --- Icons ---
 const RefreshIcon = () => (
@@ -31,18 +32,34 @@ const TranslateIcon = () => (
 const SettingsIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
 );
+const ChevronDownIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+);
 
 const App: React.FC = () => {
   const [user, setUser] = useState<any>(null);
   const [token, setToken] = useState<string | null>(null);
   const [entries, setEntries] = useState<NewsEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedRegion, setSelectedRegion] = useState<SourceRegion>('eu');
+  const [selectedRegion, setSelectedRegion] = useState<SourceRegion>('tr');
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
-  const [activeTab, setActiveTab] = useState<'feed' | 'scraper'>('feed');
+  const [activeTab, setActiveTab] = useState<'feed' | 'scraper' | 'fetcher'>('feed');
+  const [fetcherLoading, setFetcherLoading] = useState(false);
   const [showTagSettings, setShowTagSettings] = useState(false);
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
+  const [sourceTypeFilter, setSourceTypeFilter] = useState<{ scraped: boolean; api: boolean }>({ scraped: true, api: true });
+  
+  // Multi-user state
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [feedFilter, setFeedFilter] = useState<'my' | 'all' | string>('my');
+  const [allowedUsers, setAllowedUsers] = useState<string[]>([]);
+  const [preferences, setPreferences] = useState<UserPreferences>(DEFAULT_PREFERENCES);
+  const [showUserMenu, setShowUserMenu] = useState(false);
+
+  // Prefetch state (server-side caching handles the actual cache)
+  const [isPrefetching, setIsPrefetching] = useState(false);
+  const [prefetchComplete, setPrefetchComplete] = useState(false);
 
   // Get today's date in YYYY-MM-DD format
   const getTodayDate = () => new Date().toISOString().split('T')[0];
@@ -90,20 +107,53 @@ const App: React.FC = () => {
   const selectAllTags = () => setSelectedTags(new Set(allTags));
   const clearAllTags = () => setSelectedTags(new Set());
 
+  // Close user menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (showUserMenu && !(e.target as Element).closest('.user-menu-container')) {
+        setShowUserMenu(false);
+      }
+    };
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, [showUserMenu]);
+
   // Google Sign-In Initialization
   useEffect(() => {
     const initializeGoogleSignIn = () => {
       if (window.google && !user) {
         window.google.accounts.id.initialize({
           client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
-          callback: (response: any) => {
+          callback: async (response: any) => {
             const credential = response.credential;
-            setToken(credential);
             const payload = JSON.parse(atob(credential.split('.')[1]));
-            setUser(payload);
+
+            // SECURITY: Verify with backend before allowing access
+            try {
+              const userResponse = await fetch('/api/user', {
+                headers: { 'Authorization': `Bearer ${credential}` }
+              });
+
+              if (!userResponse.ok) {
+                // User not allowed - show error
+                alert(`Access Denied: Your email (${payload.email}) is not in the allowed users list. Please contact the administrator.`);
+                setToken(null);
+                setUser(null);
+                return;
+              }
+
+              // User is allowed - proceed with login
+              setToken(credential);
+              setUser(payload);
+            } catch (error) {
+              console.error('Authentication error:', error);
+              alert('Authentication failed. Please try again.');
+              setToken(null);
+              setUser(null);
+            }
           }
         });
-        
+
         const buttonDiv = document.getElementById("google-signin-button");
         if (buttonDiv) {
           window.google.accounts.id.renderButton(
@@ -129,44 +179,130 @@ const App: React.FC = () => {
     }
   }, [user]);
 
+  // Load user info (admin status, allowed users) and preferences when authenticated
+  useEffect(() => {
+    if (!token) return;
+
+    const loadUserInfo = async () => {
+      try {
+        // Load user info including admin status
+        const userResponse = await fetch('/api/user', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (userResponse.ok) {
+          const userData = await userResponse.json();
+          setIsAdmin(userData.isAdmin);
+        }
+
+        // If admin, load allowed users list for feed filter
+        const adminResponse = await fetch('/api/config/admin-users', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (adminResponse.ok) {
+          const adminData = await adminResponse.json();
+          // Load allowed users list
+          const allowedResponse = await fetch('/api/config/allowed-users', {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (allowedResponse.ok) {
+            const allowedData = await allowedResponse.json();
+            setAllowedUsers(allowedData.users || []);
+          }
+        }
+
+        // Load user preferences
+        const prefs = await loadPreferences(token);
+        setPreferences(prefs);
+        if (prefs.feedFilter) {
+          setFeedFilter(prefs.feedFilter);
+        }
+      } catch (error) {
+        console.error('Error loading user info:', error);
+      }
+    };
+
+    loadUserInfo();
+  }, [token]);
+
+  // Background prefetch historical data after login
+  useEffect(() => {
+    if (!token || !user || prefetchComplete) return;
+
+    const prefetchHistoricalData = async () => {
+      setIsPrefetching(true);
+      const historicalDepth = parseInt(import.meta.env.VITE_HISTORICAL_DEPTH || '3');
+
+      console.log(`📦 Prefetching last ${historicalDepth} days of data in background (server will cache)...`);
+
+      try {
+        // Trigger prefetch - server will cache the results
+        await fetchNews(selectedRegion, undefined, undefined, token, historicalDepth);
+        console.log(`✅ Prefetch complete - server has cached last ${historicalDepth} days`);
+        setPrefetchComplete(true);
+      } catch (error) {
+        console.error('❌ Prefetch failed:', error);
+      } finally {
+        setIsPrefetching(false);
+      }
+    };
+
+    // Start prefetch in background (don't block UI)
+    setTimeout(prefetchHistoricalData, 100);
+  }, [token, user, selectedRegion, prefetchComplete]);
+
   // Initial Fetch & Date Filter Watch - fetch whenever dates or region change
   useEffect(() => {
     if (!token) return; // Only fetch if authenticated
-
-    const isSingleDay = filters.startDate && filters.endDate && filters.startDate === filters.endDate;
-    if (isSingleDay) {
-      loadData(filters.startDate);
-    } else if (filters.startDate || filters.endDate) {
-      // If any date is set but not a single day, still trigger a fetch
-      loadData();
-    } else {
-      loadData();
-    }
+    loadData();
   }, [selectedRegion, filters.startDate, filters.endDate, token]);
 
   // Auto-refresh every 2 minutes when enabled
   useEffect(() => {
     if (!autoRefresh || !token) return;
-    
+
     const interval = setInterval(() => {
       console.log('Auto-refreshing data...');
       loadData();
     }, 2 * 60 * 1000); // 2 minutes
-    
+
     return () => clearInterval(interval);
   }, [autoRefresh, selectedRegion, filters.startDate, filters.endDate, token]);
 
-  const loadData = async (date?: string) => {
+  // Reload data when feedFilter changes
+  useEffect(() => {
+    if (!token) return;
+    loadData();
+  }, [feedFilter]);
+
+  const loadData = async () => {
     if (!token) return;
     setLoading(true);
     try {
-      const data = await fetchNews(selectedRegion, date, token);
+      console.log(`📡 Fetching data for ${filters.startDate} to ${filters.endDate}...`);
+
+      // Server-side caching handles everything now!
+      const data = await fetchNews(
+        selectedRegion,
+        filters.startDate,
+        filters.endDate,
+        token
+      );
+
       setEntries(data);
       setLastUpdated(new Date());
+      console.log(`✅ Loaded ${data.length} articles`);
     } catch (e) {
       console.error(e);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Handle feed filter change and save to preferences
+  const handleFeedFilterChange = async (newFilter: 'my' | 'all' | string) => {
+    setFeedFilter(newFilter);
+    if (token) {
+      await savePreferences(token, { ...preferences, feedFilter: newFilter });
     }
   };
 
@@ -183,13 +319,18 @@ const App: React.FC = () => {
       const matchesTags = selectedTags.size === 0 || 
                           entry.categories?.some(cat => selectedTags.has(cat));
       
+      // Source type filtering
+      const entrySourceType = entry.source_type || 'scraped'; // Default to scraped for backward compatibility
+      const matchesSourceType = (entrySourceType === 'scraped' && sourceTypeFilter.scraped) ||
+                                 (entrySourceType === 'api' && sourceTypeFilter.api);
+      
       // Note: Date filtering is handled by the API (based on scraping date),
       // not here (which would filter by article published_date).
       // Articles scraped on 2025-12-05 might have been published days earlier.
 
-      return matchesSearch && matchesStatus && matchesTags;
+      return matchesSearch && matchesStatus && matchesTags && matchesSourceType;
     });
-  }, [entries, filters, selectedTags]);
+  }, [entries, filters, selectedTags, sourceTypeFilter]);
 
   // Actions
   const handlePost = (id: string) => {
@@ -244,6 +385,47 @@ const App: React.FC = () => {
               >
                 Scraper
               </button>
+              <button
+                onClick={async () => {
+                  setFetcherLoading(true);
+                  try {
+                    // Fetch config from GCS
+                    const configRes = await fetch('/api/config/news-api', {
+                      headers: { 'Authorization': `Bearer ${token}` }
+                    });
+
+                    if (!configRes.ok) throw new Error('Failed to load config');
+                    const config = await configRes.json();
+
+                    // Trigger with config values
+                    const res = await fetch('/api/trigger-news-api', {
+                      method: 'POST',
+                      headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                      },
+                      body: JSON.stringify({
+                        keywords: config.default_keywords,
+                        time_range: config.default_time_range,
+                        max_results: config.default_max_results
+                      })
+                    });
+                    if (!res.ok) throw new Error('Failed to trigger fetcher');
+                    alert('Fetcher triggered successfully!');
+                  } catch (e) {
+                    alert('Failed to trigger fetcher.');
+                  } finally {
+                    setFetcherLoading(false);
+                  }
+                }}
+                className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors flex items-center gap-2 ${
+                  fetcherLoading ? 'bg-blue-900 text-blue-300' : 'text-slate-400 hover:text-white'
+                }`}
+                disabled={fetcherLoading}
+              >
+                Fetcher
+                {fetcherLoading && <span className="ml-1 animate-spin">⏳</span>}
+              </button>
             </div>
           </div>
           <div className="flex items-center gap-4">
@@ -278,12 +460,89 @@ const App: React.FC = () => {
              <button onClick={() => loadData()} className="p-2 hover:bg-slate-800 rounded-full transition-colors text-slate-400 hover:text-white" title="Refresh now">
                <RefreshIcon />
              </button>
-             <button 
-               onClick={() => { setUser(null); setToken(null); }}
-               className="ml-2 px-3 py-1.5 text-xs font-medium bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white rounded-lg transition-colors"
-             >
-               Sign Out
-             </button>
+             
+             {/* Feed Filter Dropdown (Admin only sees all options) */}
+             <div className="relative user-menu-container">
+               <button 
+                 onClick={() => setShowUserMenu(!showUserMenu)}
+                 className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors"
+               >
+                 {user?.picture ? (
+                   <img src={user.picture} alt="" className="w-6 h-6 rounded-full" />
+                 ) : (
+                   <div className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center text-xs font-bold text-white">
+                     {user?.name?.charAt(0) || '?'}
+                   </div>
+                 )}
+                 <span className="text-sm text-slate-300 hidden md:inline max-w-[120px] truncate">
+                   {user?.name || user?.email}
+                 </span>
+                 <ChevronDownIcon />
+               </button>
+               
+               {showUserMenu && (
+                 <div className="absolute right-0 mt-2 w-64 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-50">
+                   <div className="p-3 border-b border-slate-700">
+                     <p className="text-sm font-medium text-white truncate">{user?.name}</p>
+                     <p className="text-xs text-slate-400 truncate">{user?.email}</p>
+                     {isAdmin && (
+                       <span className="inline-block mt-1 px-2 py-0.5 text-[10px] font-bold bg-amber-600/20 text-amber-400 rounded">
+                         ADMIN
+                       </span>
+                     )}
+                   </div>
+                   
+                   <div className="p-2 border-b border-slate-700">
+                     <p className="px-2 py-1 text-xs font-medium text-slate-500 uppercase">Feed Filter</p>
+                     <button
+                       onClick={() => { handleFeedFilterChange('my'); setShowUserMenu(false); }}
+                       className={`w-full text-left px-3 py-2 text-sm rounded-md transition-colors ${
+                         feedFilter === 'my' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-700'
+                       }`}
+                     >
+                       My Feeds
+                     </button>
+                     {isAdmin && (
+                       <>
+                         <button
+                           onClick={() => { handleFeedFilterChange('all'); setShowUserMenu(false); }}
+                           className={`w-full text-left px-3 py-2 text-sm rounded-md transition-colors ${
+                             feedFilter === 'all' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-700'
+                           }`}
+                         >
+                           All Feeds
+                         </button>
+                         {allowedUsers.filter(email => email !== user?.email).length > 0 && (
+                           <div className="mt-1 pt-1 border-t border-slate-700">
+                             <p className="px-3 py-1 text-xs text-slate-500">Other Users</p>
+                             {allowedUsers.filter(email => email !== user?.email).map(email => (
+                               <button
+                                 key={email}
+                                 onClick={() => { handleFeedFilterChange(email); setShowUserMenu(false); }}
+                                 className={`w-full text-left px-3 py-2 text-sm rounded-md transition-colors truncate ${
+                                   feedFilter === email ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-700'
+                                 }`}
+                               >
+                                 {email}
+                               </button>
+                             ))}
+                           </div>
+                         )}
+                       </>
+                     )}
+                   </div>
+                   
+                   <div className="p-2">
+                     <button 
+                       onClick={() => { setUser(null); setToken(null); setShowUserMenu(false); }}
+                       className="w-full text-left px-3 py-2 text-sm text-red-400 hover:bg-slate-700 rounded-md transition-colors"
+                     >
+                       Sign Out
+                     </button>
+                   </div>
+                 </div>
+               )}
+             </div>
           </div>
         </div>
       </header>
@@ -291,9 +550,29 @@ const App: React.FC = () => {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         
         {activeTab === 'scraper' ? (
-          <ScraperTrigger />
+          <ScraperTrigger token={token || undefined} />
         ) : (
           <>
+        {/* Prefetch & Cache Indicator */}
+        {isPrefetching && (
+          <div className="mb-4 p-3 bg-blue-900/20 border border-blue-700/30 rounded-lg flex items-center gap-3">
+            <svg className="animate-spin h-4 w-4 text-blue-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span className="text-sm text-blue-300">
+              Loading last {import.meta.env.VITE_HISTORICAL_DEPTH || '3'} days of data in background...
+            </span>
+          </div>
+        )}
+        {prefetchComplete && (
+          <div className="mb-4 p-2 bg-green-900/10 border border-green-700/20 rounded-lg">
+            <span className="text-xs text-green-400">
+              💾 Server cache ready (fast loading enabled)
+            </span>
+          </div>
+        )}
+
         {/* Controls & Analysis Bar */}
         <div className="mb-8 space-y-6">
           <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between bg-slate-900 p-4 rounded-xl border border-slate-800">
@@ -354,6 +633,28 @@ const App: React.FC = () => {
                   <h2 className="text-lg font-semibold text-white">
                     Feed <span className="ml-2 px-2 py-0.5 bg-slate-800 text-slate-400 text-xs rounded-full">{filteredEntries.length}</span>
                   </h2>
+                  {/* Source Type Filter */}
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 rounded-lg border border-slate-700">
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={sourceTypeFilter.scraped}
+                        onChange={(e) => setSourceTypeFilter(prev => ({ ...prev, scraped: e.target.checked }))}
+                        className="w-3 h-3 rounded border-slate-600 bg-slate-700 text-orange-500 focus:ring-orange-500 focus:ring-offset-slate-800"
+                      />
+                      <span className="text-xs font-medium text-orange-400">Scraped</span>
+                    </label>
+                    <div className="w-px h-4 bg-slate-600"></div>
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={sourceTypeFilter.api}
+                        onChange={(e) => setSourceTypeFilter(prev => ({ ...prev, api: e.target.checked }))}
+                        className="w-3 h-3 rounded border-slate-600 bg-slate-700 text-blue-500 focus:ring-blue-500 focus:ring-offset-slate-800"
+                      />
+                      <span className="text-xs font-medium text-blue-400">API</span>
+                    </label>
+                  </div>
                   <button
                     onClick={() => setShowTagSettings(!showTagSettings)}
                     className={`p-2 rounded-lg transition-colors border ${
@@ -390,22 +691,17 @@ const App: React.FC = () => {
                  </div>
                  <div className="flex flex-wrap gap-2">
                    {allTags.map(tag => (
-                     <label
+                     <div
                        key={tag}
+                       onClick={() => toggleTag(tag)}
                        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg cursor-pointer transition-colors border ${
                          selectedTags.has(tag)
                            ? 'bg-blue-600/20 border-blue-500 text-blue-300'
                            : 'bg-slate-800 border-slate-700 text-slate-500 hover:text-slate-300'
                        }`}
                      >
-                       <input
-                         type="checkbox"
-                         checked={selectedTags.has(tag)}
-                         onChange={() => toggleTag(tag)}
-                         className="sr-only"
-                       />
                        <span className="text-xs font-medium">{tag.replace(/_/g, ' ')}</span>
-                     </label>
+                     </div>
                    ))}
                  </div>
                </div>
@@ -506,12 +802,27 @@ const NewsCard: React.FC<{
               {entry.source}
             </a>
             <span className="text-xs text-slate-500">{timeAgo(entry.published_date)}</span>
+            {/* Source Type Badge - sphere with text on hover */}
+            <span className={`group relative flex items-center gap-1 cursor-default`}>
+              <span className={`w-2.5 h-2.5 rounded-full ${
+                entry.source_type === 'api' 
+                  ? 'bg-blue-500' 
+                  : 'bg-orange-500'
+              }`}></span>
+              <span className={`text-[10px] font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-200 ${
+                entry.source_type === 'api' 
+                  ? 'text-blue-400' 
+                  : 'text-orange-400'
+              }`}>
+                {entry.source_type === 'api' ? 'API' : 'SCRAPED'}
+              </span>
+            </span>
             <span className={`text-[10px] px-1.5 py-0.5 rounded border ${
               entry.content_quality === 'high' ? 'border-green-800 text-green-400 bg-green-900/20' : 
               entry.content_quality === 'medium' ? 'border-yellow-800 text-yellow-400 bg-yellow-900/20' : 
               'border-red-800 text-red-400 bg-red-900/20'
             }`}>
-              {entry.content_quality.toUpperCase()}
+              {entry.content_quality?.toUpperCase() || 'N/A'}
             </span>
             {entry.article_id && (
               <button
