@@ -314,11 +314,14 @@ const App: React.FC = () => {
                             entry.source.toLowerCase().includes(filters.search.toLowerCase());
       
       const matchesStatus = filters.status === 'ALL' ? true : entry.status === filters.status;
-      
+
       // Tag filtering: entry must have at least one category that is selected
-      const matchesTags = selectedTags.size === 0 || 
-                          entry.categories?.some(cat => selectedTags.has(cat));
-      
+      // OR have no categories (uncategorized articles should always show)
+      const matchesTags = selectedTags.size === 0 ||
+                          !entry.categories ||
+                          entry.categories.length === 0 ||
+                          entry.categories.some(cat => selectedTags.has(cat));
+
       // Source type filtering
       const entrySourceType = entry.source_type || 'scraped'; // Default to scraped for backward compatibility
       const matchesSourceType = (entrySourceType === 'scraped' && sourceTypeFilter.scraped) ||
