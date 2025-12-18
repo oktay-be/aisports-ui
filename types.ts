@@ -7,26 +7,41 @@ export enum PostStatus {
 export type SourceRegion = 'eu' | 'tr';
 
 export interface KeyEntities {
+  teams: string[];
+  players: string[];
+  amounts: string[];
+  dates: string[];
   competitions: string[];
   locations: string[];
-  players: string[];
-  teams: string[];
+}
+
+export interface CategoryAssignment {
+  tag: string;
+  confidence: number;
+  evidence?: string;
 }
 
 export interface ProcessedArticle {
-  article_id?: string;
+  article_id: string;
   original_url: string;
+  merged_from_urls?: string[];
   title: string;
   summary: string;
   source: string;
   published_date: string;
-  categories: string[];
+  categories: CategoryAssignment[];
   key_entities: KeyEntities;
   content_quality: 'high' | 'medium' | 'low';
   confidence: number;
   language: string;
   summary_translation?: string;
   x_post?: string;
+  _grouping_metadata?: {
+    group_id: number;
+    group_size: number;
+    max_similarity: number;
+    merge_decision: string;
+  };
   _dedup_metadata?: any;
   source_type?: 'scraped' | 'api';
 }
