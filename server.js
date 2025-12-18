@@ -479,142 +479,132 @@ app.get('/api/news', async (req, res) => {
     if (datesToFetchFromGCS.length > 0) {
       console.log(`🔍 Fetching ${datesToFetchFromGCS.length} dates from GCS...`);
 
-      // Helper function to parse articles from JSONL content
-      const parseArticlesFromJSONL = (fileContent, sourceType) => {
-        const articles = [];
-        const lines = fileContent.split('\n').filter(line => line.trim());
-
-        for (const line of lines) {
-          try {
-            const json = JSON.parse(line);
-            let articlesToAdd = [];
-
-            // Case 1: Vertex AI Batch Response (nested JSON in candidates)
-            if (json.response?.candidates?.[0]?.content?.parts?.[0]?.text) {
-              const text = json.response.candidates[0].content.parts[0].text;
-              const cleanText = text.replace(/```json\n?|\n?```/g, '');
-              try {
-                const parsedInner = JSON.parse(cleanText);
-                if (parsedInner.processed_articles) {
-                  articlesToAdd = parsedInner.processed_articles;
-                } else if (parsedInner.consolidated_articles) {
-                  articlesToAdd = parsedInner.consolidated_articles;
-                } else if (Array.isArray(parsedInner)) {
-                  articlesToAdd = parsedInner;
-                } else if (parsedInner.title) {
-                  articlesToAdd = [parsedInner];
-                }
-              } catch (e) {
-                console.error('Error parsing inner JSON:', e);
-              }
-            }
-            // Case 2: Direct article object (flat JSONL)
-            else if (json.title && json.summary && json.original_url) {
-              articlesToAdd = [json];
-            }
-            // Case 3: List of articles
-            else if (Array.isArray(json)) {
-              articlesToAdd = json;
-            }
-            // Case 4: Prediction wrapper
-            else if (json.prediction) {
-              if (Array.isArray(json.prediction)) {
-                articlesToAdd = json.prediction;
-              } else {
-                articlesToAdd = [json.prediction];
-              }
-            }
-
-            // Add source_type and add to results
-            for (const article of articlesToAdd) {
-              article.source_type = sourceType;
-              articles.push(article);
-            }
-          } catch (err) {
-            console.error('Error parsing JSONL line:', err);
-          }
-        }
-        return articles;
-      };
-
       // Fetch data for each missing date
       for (const date of datesToFetchFromGCS) {
         const dateArticles = [];
-        const [year, month] = date.split('-');
 
-        // --- Fetch Scraped Data ---
-        const scrapedPrefix = `news_data/batch_processing/${region}/${year}-${month}/${date}/`;
-        console.log(`📂 Fetching scraped data for ${date}: ${scrapedPrefix}`);
+        // --- NEW STRUCTURE: Fetch from processing/ folder ---
+        // Path: processing/YYYY-MM-DD/*/articles.json
+        const processingPrefix = `processing/${date}/`;
+        console.log(`📂 Fetching processed data for ${date}: ${processingPrefix}`);
 
         try {
-          const [scrapedFiles] = await storage.bucket(BUCKET_NAME).getFiles({
-            prefix: scrapedPrefix,
-            matchGlob: '**/stage2_deduplication/results/**predictions.jsonl'
+          const [processedFiles] = await storage.bucket(BUCKET_NAME).getFiles({
+            prefix: processingPrefix,
+            matchGlob: '**/articles.json'
           });
 
-          for (const file of scrapedFiles) {
+          for (const file of processedFiles) {
+            // Skip source_manifest.json and metadata.json
+            if (file.name.includes('source_manifest') || file.name.includes('metadata')) {
+              continue;
+            }
+
             try {
               const [content] = await file.download();
-              const articles = parseArticlesFromJSONL(content.toString(), 'scraped');
-              dateArticles.push(...articles);
+              const data = JSON.parse(content.toString());
+
+              // Handle both direct array and wrapped formats
+              let articles = [];
+              if (Array.isArray(data)) {
+                articles = data;
+              } else if (data.processed_articles) {
+                articles = data.processed_articles;
+              } else if (data.articles) {
+                articles = data.articles;
+              }
+
+              for (const article of articles) {
+                // Articles from processing/ are already in ProcessedArticle format
+                dateArticles.push({
+                  article_id: article.article_id,
+                  original_url: article.original_url,
+                  merged_from_urls: article.merged_from_urls,
+                  title: article.title,
+                  summary: article.summary,
+                  source: article.source,
+                  published_date: article.published_date,
+                  categories: article.categories || [],
+                  key_entities: article.key_entities || {
+                    teams: [],
+                    players: [],
+                    amounts: [],
+                    dates: [],
+                    competitions: [],
+                    locations: []
+                  },
+                  content_quality: article.content_quality || 'medium',
+                  confidence: article.confidence || 0.8,
+                  language: article.language || 'tr',
+                  summary_translation: article.summary_translation,
+                  x_post: article.x_post,
+                  _grouping_metadata: article._grouping_metadata,
+                  source_type: 'processed'
+                });
+              }
               console.log(`  ✅ ${file.name}: ${articles.length} articles`);
             } catch (err) {
               console.error(`  ❌ Error processing ${file.name}:`, err.message);
             }
           }
         } catch (err) {
-          console.error(`  ❌ Error fetching scraped files for ${date}:`, err.message);
+          console.error(`  ❌ Error fetching processed files for ${date}:`, err.message);
         }
 
-        // --- Fetch API Data ---
-        const apiPrefix = `news_data/api/${year}-${month}/${date}/`;
-        console.log(`📂 Fetching API data for ${date}: ${apiPrefix}`);
+        // --- FALLBACK: Also check ingestion/api/ for raw articles (not yet processed) ---
+        // Path: ingestion/api/YYYY-MM-DD/*/articles.json
+        const ingestionPrefix = `ingestion/api/${date}/`;
+        console.log(`📂 Checking raw ingestion data for ${date}: ${ingestionPrefix}`);
 
         try {
-          const [apiFiles] = await storage.bucket(BUCKET_NAME).getFiles({
-            prefix: apiPrefix,
+          const [ingestionFiles] = await storage.bucket(BUCKET_NAME).getFiles({
+            prefix: ingestionPrefix,
             matchGlob: '**/articles.json'
           });
 
-          for (const file of apiFiles) {
+          // Filter out scraped/ subfolder - only get direct articles.json
+          const directArticleFiles = ingestionFiles.filter(f => !f.name.includes('/scraped/'));
+
+          for (const file of directArticleFiles) {
             try {
               const [content] = await file.download();
               const data = JSON.parse(content.toString());
               if (data.articles && Array.isArray(data.articles)) {
                 for (const article of data.articles) {
-                  // Transform API article to match ProcessedArticle schema
+                  // Transform raw API article to match ProcessedArticle schema
                   const transformedArticle = {
                     article_id: article.article_id || `api_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
                     original_url: article.url || article.original_url,
                     title: article.title || 'Untitled',
-                    summary: article.content || article.summary || article.description || '',
-                    source: article.source || article.api_source || 'News API',
+                    summary: article.body || article.content || article.summary || article.description || '',
+                    source: article.source || article.site || 'News API',
                     published_date: article.published_at || article.published_date || new Date().toISOString(),
                     categories: article.categories || [],
                     key_entities: article.key_entities || {
-                      competitions: [],
-                      locations: [],
+                      teams: [],
                       players: [],
-                      teams: []
+                      amounts: [],
+                      dates: [],
+                      competitions: [],
+                      locations: []
                     },
                     content_quality: article.content_quality || 'medium',
                     confidence: article.confidence || 0.5,
                     language: article.language || 'en',
                     summary_translation: article.summary_translation,
                     x_post: article.x_post,
-                    source_type: 'api',
-                    image_url: article.image_url
+                    source_type: 'api_raw'
                   };
                   dateArticles.push(transformedArticle);
                 }
-                console.log(`  ✅ ${file.name}: ${data.articles.length} articles`);
+                console.log(`  ✅ ${file.name}: ${data.articles.length} raw articles`);
               }
             } catch (err) {
               console.error(`  ❌ Error processing ${file.name}:`, err.message);
             }
           }
         } catch (err) {
-          console.error(`  ❌ Error fetching API files for ${date}:`, err.message);
+          console.error(`  ❌ Error fetching ingestion files for ${date}:`, err.message);
         }
 
         // Store date's articles
