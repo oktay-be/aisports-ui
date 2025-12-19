@@ -42,8 +42,22 @@ export interface ProcessedArticle {
     max_similarity: number;
     merge_decision: string;
   };
-  _dedup_metadata?: any;
-  source_type?: 'scraped' | 'api';
+  _merge_metadata?: {
+    decision: 'MERGED' | 'KEPT_SEPARATE';
+    reason: string;
+    group_id: number;
+    merged_from_count?: number;
+    merged_urls?: string[];
+    group_size?: number;
+  };
+  _processing_metadata?: {
+    source_type: string;
+    date: string;
+    run_id: string;
+    group_type: 'singleton' | 'grouped';
+    group_id?: number;
+  };
+  source_type?: 'scraped' | 'api' | 'processed';
 }
 
 export interface NewsEntry extends ProcessedArticle {

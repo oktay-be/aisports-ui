@@ -539,6 +539,8 @@ app.get('/api/news', async (req, res) => {
                   summary_translation: article.summary_translation,
                   x_post: article.x_post,
                   _grouping_metadata: article._grouping_metadata,
+                  _merge_metadata: article._merge_metadata,
+                  _processing_metadata: article._processing_metadata,
                   source_type: 'processed'
                 });
               }
