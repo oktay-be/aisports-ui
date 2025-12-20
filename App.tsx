@@ -80,7 +80,10 @@ const App: React.FC = () => {
   const allTags = useMemo(() => {
     const tags = new Set<string>();
     entries.forEach(entry => {
-      entry.categories?.forEach(cat => tags.add(cat));
+      entry.categories?.forEach(cat => {
+        const tag = typeof cat === 'string' ? cat : cat.tag;
+        if (tag) tags.add(tag);
+      });
     });
     return Array.from(tags).sort();
   }, [entries]);
@@ -887,11 +890,14 @@ const NewsCard: React.FC<{
 
         {/* Categories/Tags */}
         <div className="flex flex-wrap gap-1.5 mb-4">
-          {entry.categories.slice(0, 3).map((cat, idx) => (
-            <span key={idx} className="px-2 py-0.5 bg-slate-800 text-slate-400 text-[10px] rounded-full border border-slate-700">
-              #{cat}
-            </span>
-          ))}
+          {entry.categories.slice(0, 3).map((cat, idx) => {
+            const tag = typeof cat === 'string' ? cat : cat.tag;
+            return (
+              <span key={idx} className="px-2 py-0.5 bg-slate-800 text-slate-400 text-[10px] rounded-full border border-slate-700">
+                #{tag}
+              </span>
+            );
+          })}
           {entry.categories.length > 3 && (
             <span className="px-2 py-0.5 text-slate-500 text-[10px]">+{entry.categories.length - 3}</span>
           )}

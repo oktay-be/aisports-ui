@@ -639,19 +639,20 @@ app.get('/api/news', async (req, res) => {
     console.log(`📊 After dedup: ${uniqueArticles.length} unique articles (${allArticles.length - uniqueArticles.length} duplicates removed)`);
 
     // --- FILTER BY REGION ---
-    // If region is specified, filter articles to match
-    // region=tr returns only Turkish articles, region=eu returns European articles
-    // Strict matching - articles without region field will not match
+    // Filter articles based on the 'region' field in the JSON content.
+    // If region is 'all' or not specified, return all articles.
     const regionFilteredArticles = uniqueArticles.filter(article => {
-      // If no region specified or region is 'all', return all articles
       if (!region || region === 'all') return true;
-      // Strict matching - articles must have region field
       return article.region === region;
     });
 
     console.log(`🌍 After region filter (${region}): ${regionFilteredArticles.length} articles`);
 
     if (regionFilteredArticles.length === 0) {
+      // If strict filtering returns nothing, check if we have ANY data for debugging
+      if (uniqueArticles.length > 0) {
+        console.warn(`⚠️ Found ${uniqueArticles.length} articles but none matched region '${region}'. Available regions: ${[...new Set(uniqueArticles.map(a => a.region))].join(', ')}`);
+      }
       return res.status(404).json({ error: `No data found for region: ${region}` });
     }
 
