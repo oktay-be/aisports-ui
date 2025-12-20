@@ -641,22 +641,12 @@ app.get('/api/news', async (req, res) => {
     // --- FILTER BY REGION ---
     // If region is specified, filter articles to match
     // region=tr returns only Turkish articles, region=eu returns European articles
+    // Strict matching - articles without region field will not match
     const regionFilteredArticles = uniqueArticles.filter(article => {
       // If no region specified or region is 'all', return all articles
       if (!region || region === 'all') return true;
-
-      // Get article's region, with fallback to language-based mapping
-      // This handles older data that may not have the region field
-      let articleRegion = article.region;
-      if (!articleRegion && article.language) {
-        // Map language to region: tr/turkish -> tr, everything else -> eu
-        const lang = article.language.toLowerCase();
-        articleRegion = (lang === 'tr' || lang === 'turkish') ? 'tr' : 'eu';
-      }
-      // Default to 'eu' if neither region nor language exists
-      articleRegion = articleRegion || 'eu';
-
-      return articleRegion === region;
+      // Strict matching - articles must have region field
+      return article.region === region;
     });
 
     console.log(`🌍 After region filter (${region}): ${regionFilteredArticles.length} articles`);

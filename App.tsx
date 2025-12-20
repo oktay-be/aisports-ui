@@ -821,11 +821,15 @@ const NewsCard: React.FC<{
               </span>
             </span>
             <span className={`text-[10px] px-1.5 py-0.5 rounded border ${
-              entry.content_quality === 'high' ? 'border-green-800 text-green-400 bg-green-900/20' : 
-              entry.content_quality === 'medium' ? 'border-yellow-800 text-yellow-400 bg-yellow-900/20' : 
+              entry.content_quality === 'high' ? 'border-green-800 text-green-400 bg-green-900/20' :
+              entry.content_quality === 'medium' ? 'border-yellow-800 text-yellow-400 bg-yellow-900/20' :
               'border-red-800 text-red-400 bg-red-900/20'
             }`}>
               {entry.content_quality?.toUpperCase() || 'N/A'}
+            </span>
+            {/* Language Badge */}
+            <span className="text-[10px] px-1.5 py-0.5 rounded border border-slate-700 text-slate-400 bg-slate-800/50">
+              {entry.language?.toUpperCase() || 'TR'}
             </span>
             {entry.article_id && (
               <button
