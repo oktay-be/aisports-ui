@@ -485,12 +485,12 @@ app.get('/api/news', async (req, res) => {
 
         // --- Fetch from ingestion/ folder where enriched articles are written ---
         // Path: ingestion/YYYY-MM-DD/*/enriched_complete_articles.json
-        const ingestionPrefix = `ingestion/${date}/`;
-        console.log(`📂 Fetching enriched articles for ${date}: ${ingestionPrefix}`);
+        const enrichedPrefix = `ingestion/${date}/`;
+        console.log(`📂 Fetching enriched articles for ${date}: ${enrichedPrefix}`);
 
         try {
           const [processedFiles] = await storage.bucket(BUCKET_NAME).getFiles({
-            prefix: ingestionPrefix,
+            prefix: enrichedPrefix,
             matchGlob: '**/enriched_*_articles.json'
           });
 
