@@ -489,16 +489,16 @@ app.get('/api/news', async (req, res) => {
         console.log(`📂 Fetching enriched articles for ${date}: ${enrichedPrefix}`);
 
         try {
-          const [processedFiles] = await storage.bucket(BUCKET_NAME).getFiles({
-            prefix: enrichedPrefix,
-            matchGlob: '**/enriched_*_articles.json'
+          const [allFiles] = await storage.bucket(BUCKET_NAME).getFiles({
+            prefix: enrichedPrefix
           });
+          // Manual filter - matchGlob doesn't work reliably in Node.js
+          const processedFiles = allFiles.filter(f =>
+            f.name.includes('enriched_') && f.name.endsWith('_articles.json')
+          );
+          console.log(`  Found ${processedFiles.length} enriched files (from ${allFiles.length} total)`);
 
           for (const file of processedFiles) {
-            // Skip source_manifest.json and metadata.json
-            if (file.name.includes('source_manifest') || file.name.includes('metadata')) {
-              continue;
-            }
 
             try {
               const [content] = await file.download();
@@ -559,13 +559,15 @@ app.get('/api/news', async (req, res) => {
         console.log(`📂 Checking raw ingestion data for ${date}: ${ingestionPrefix}`);
 
         try {
-          const [ingestionFiles] = await storage.bucket(BUCKET_NAME).getFiles({
-            prefix: ingestionPrefix,
-            matchGlob: '**/articles.json'
+          const [allIngestionFiles] = await storage.bucket(BUCKET_NAME).getFiles({
+            prefix: ingestionPrefix
           });
-
-          // Filter out scraped/ subfolder - only get direct articles.json
-          const directArticleFiles = ingestionFiles.filter(f => !f.name.includes('/scraped/'));
+          // Manual filter - matchGlob doesn't work reliably in Node.js
+          // Filter for articles.json files, excluding /scraped/ subfolder
+          const directArticleFiles = allIngestionFiles.filter(f =>
+            f.name.endsWith('articles.json') && !f.name.includes('/scraped/')
+          );
+          console.log(`  Found ${directArticleFiles.length} raw article files`);
 
           for (const file of directArticleFiles) {
             try {
