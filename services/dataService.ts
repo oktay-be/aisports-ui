@@ -887,7 +887,15 @@ export const fetchNews = async (
   lastNDays?: number
 ): Promise<NewsEntry[]> => {
     try {
-      let url = `/api/news?region=${region}`;
+      const apiUrl = import.meta.env.VITE_ARTICLE_API_URL;
+      const apiKey = import.meta.env.VITE_ARTICLE_API_KEY;
+
+      if (!apiUrl) {
+        console.error('VITE_ARTICLE_API_URL is not configured');
+        return [];
+      }
+
+      let url = `${apiUrl}?region=${region}`;
       if (startDate && endDate) {
         url += `&startDate=${startDate}&endDate=${endDate}`;
       }
@@ -895,21 +903,21 @@ export const fetchNews = async (
         url += `&last_n_days=${lastNDays}`;
       }
 
-      const headers: HeadersInit = {};
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
+      const headers: HeadersInit = {
+        'Content-Type': 'application/json'
+      };
+
+      if (apiKey) {
+        headers['X-API-Key'] = apiKey;
       }
 
       const response = await fetch(url, { headers });
+      
       if (!response.ok) {
-        if (response.status === 401 || response.status === 403) {
-           console.error("Authentication failed");
-           throw new Error("Authentication failed");
-        }
-        // Return empty array instead of mock data to avoid showing wrong region data
-        console.warn(`No data found for ${region}${startDate ? ` for ${startDate} - ${endDate}` : ''}`);
+        console.warn(`API Error: ${response.status} ${response.statusText}`);
         return [];
       }
+      
       const articles: ProcessedArticle[] = await response.json();
 
       return articles.map((article, index) => ({
