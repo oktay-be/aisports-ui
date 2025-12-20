@@ -629,7 +629,7 @@ app.get('/api/news', async (req, res) => {
     const seenUrls = new Set();
     const uniqueArticles = [];
     for (const article of allArticles) {
-      const url = article.original_url || article.url;
+      const url = article.original_url || article.url || article.article_id;
       if (url && !seenUrls.has(url)) {
         seenUrls.add(url);
         uniqueArticles.push(article);
