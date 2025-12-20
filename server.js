@@ -483,15 +483,15 @@ app.get('/api/news', async (req, res) => {
       for (const date of datesToFetchFromGCS) {
         const dateArticles = [];
 
-        // --- NEW STRUCTURE: Fetch from processing/ folder ---
-        // Path: processing/YYYY-MM-DD/*/articles.json
-        const processingPrefix = `processing/${date}/`;
-        console.log(`📂 Fetching processed data for ${date}: ${processingPrefix}`);
+        // --- Fetch from ingestion/ folder where enriched articles are written ---
+        // Path: ingestion/YYYY-MM-DD/*/enriched_complete_articles.json
+        const ingestionPrefix = `ingestion/${date}/`;
+        console.log(`📂 Fetching enriched articles for ${date}: ${ingestionPrefix}`);
 
         try {
           const [processedFiles] = await storage.bucket(BUCKET_NAME).getFiles({
-            prefix: processingPrefix,
-            matchGlob: '**/articles.json'
+            prefix: ingestionPrefix,
+            matchGlob: '**/enriched_*_articles.json'
           });
 
           for (const file of processedFiles) {
