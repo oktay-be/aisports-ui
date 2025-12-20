@@ -636,12 +636,25 @@ app.get('/api/news', async (req, res) => {
       }
     }
 
-    if (uniqueArticles.length === 0) {
-      return res.status(404).json({ error: 'No data found' });
+    console.log(`📊 After dedup: ${uniqueArticles.length} unique articles (${allArticles.length - uniqueArticles.length} duplicates removed)`);
+
+    // --- FILTER BY REGION ---
+    // If region is specified, filter articles to match
+    // region=tr returns only Turkish articles, region=eu returns European articles
+    const regionFilteredArticles = uniqueArticles.filter(article => {
+      // If no region specified or region is 'all', return all articles
+      if (!region || region === 'all') return true;
+      // Match article region to requested region
+      return article.region === region;
+    });
+
+    console.log(`🌍 After region filter (${region}): ${regionFilteredArticles.length} articles`);
+
+    if (regionFilteredArticles.length === 0) {
+      return res.status(404).json({ error: `No data found for region: ${region}` });
     }
 
-    console.log(`Returning ${uniqueArticles.length} unique articles (${allArticles.length - uniqueArticles.length} duplicates removed)`);
-    res.json(uniqueArticles);
+    res.json(regionFilteredArticles);
   } catch (error) {
     console.error('GCS Proxy Request Error:', error);
     res.status(500).json({ error: error.message });
