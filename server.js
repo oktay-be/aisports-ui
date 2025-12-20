@@ -74,7 +74,7 @@ const isCacheValid = (cacheEntry) => {
 
 // --- VALIDATION SCHEMAS ---
 const TriggerScraperSchema = z.object({
-  collection_id: z.enum(['eu', 'tr', 'us'], { errorMap: () => ({ message: 'Invalid region' }) }),
+  region: z.enum(['eu', 'tr'], { errorMap: () => ({ message: 'Invalid region' }) }),
   urls: z.array(z.string().url('Invalid URL format')).min(1, 'At least one URL required').max(50, 'Maximum 50 URLs allowed'),
   options: z.object({}).optional(),
 });
@@ -535,7 +535,8 @@ app.get('/api/news', async (req, res) => {
                   },
                   content_quality: article.content_quality || 'medium',
                   confidence: article.confidence || 0.8,
-                  language: article.language || 'tr',
+                  language: article.language,
+                  region: article.region,
                   summary_translation: article.summary_translation,
                   x_post: article.x_post,
                   _grouping_metadata: article._grouping_metadata,
@@ -594,7 +595,8 @@ app.get('/api/news', async (req, res) => {
                     },
                     content_quality: article.content_quality || 'medium',
                     confidence: article.confidence || 0.5,
-                    language: article.language || 'en',
+                    language: article.language,
+                    region: article.region,
                     summary_translation: article.summary_translation,
                     x_post: article.x_post,
                     source_type: 'api_raw'
@@ -685,7 +687,7 @@ app.post('/api/trigger-scraper', scraperLimiter, async (req, res) => {
       ...validated,
       triggered_by: req.user.email  // Add user email to track who triggered the scrape
     };
-    console.log(`Triggering scraper for ${payload.collection_id} by ${req.user.email}:`, payload);
+    console.log(`Triggering scraper for ${payload.region} by ${req.user.email}:`, payload);
 
     const topicPath = pubsub.topic(SCRAPING_TOPIC);
     const dataBuffer = Buffer.from(JSON.stringify(payload));
@@ -693,7 +695,7 @@ app.post('/api/trigger-scraper', scraperLimiter, async (req, res) => {
 
     // Write audit log
     await writeAuditLog('trigger_scraper', req.user.email, {
-      region: payload.collection_id,
+      region: payload.region,
       urlCount: payload.urls.length,
       messageId
     });
@@ -702,7 +704,7 @@ app.post('/api/trigger-scraper', scraperLimiter, async (req, res) => {
     res.json({
       success: true,
       messageId,
-      region: payload.collection_id,
+      region: payload.region,
       sourcesCount: payload.urls.length,
       triggeredBy: req.user.email
     });

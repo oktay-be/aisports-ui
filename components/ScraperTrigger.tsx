@@ -307,7 +307,7 @@ export const ScraperTrigger: React.FC<{ token?: string }> = ({ token }) => {
       scrape_depth: config.scrapeDepth,
       persist: false,
       log_level: 'INFO',
-      collection_id: region,
+      region,
     };
 
     try {

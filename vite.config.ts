@@ -502,7 +502,7 @@ const gcsProxyPlugin = () => {
             // Add triggered_by to payload
             payload.triggered_by = user.email;
 
-            console.log(`Triggering scraper for ${payload.collection_id} by ${user.email}:`, payload);
+            console.log(`Triggering scraper for ${payload.region} by ${user.email}:`, payload);
 
             // Publish to Pub/Sub topic
             const topicPath = pubsub.topic(scrapingTopic);
@@ -516,7 +516,7 @@ const gcsProxyPlugin = () => {
             res.end(JSON.stringify({
               success: true,
               messageId,
-              region: payload.collection_id,
+              region: payload.region,
               sourcesCount: payload.urls.length,
               triggeredBy: user.email
             }));

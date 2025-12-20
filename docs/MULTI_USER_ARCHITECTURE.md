@@ -130,7 +130,7 @@ Body:
   "keywords": [...],
   "urls": [...],
   "scrape_depth": 2,
-  "collection_id": "tr"
+  "region": "tr"
 }
 ```
 Server automatically adds `triggered_by: req.user.email` to the Pub/Sub message.
