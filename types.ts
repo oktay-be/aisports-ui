@@ -27,6 +27,7 @@ export interface ProcessedArticle {
   merged_from_urls?: string[];
   title: string;
   summary: string;
+  content?: string;  // Full article body
   source: string;
   published_date: string;
   categories: CategoryAssignment[];

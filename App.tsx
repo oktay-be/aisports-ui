@@ -968,6 +968,16 @@ const NewsCard: React.FC<{
                   </p>
                 </div>
 
+                {/* Full Content Section */}
+                {entry.content && (
+                  <div className="mb-6">
+                    <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-2">Full Article Content</h3>
+                    <div className="bg-slate-800/30 p-4 rounded-lg border border-slate-700 max-h-96 overflow-y-auto">
+                      <p className="text-slate-300 leading-relaxed whitespace-pre-wrap">{entry.content}</p>
+                    </div>
+                  </div>
+                )}
+
                 {/* Key Entities Section */}
                 {entry.key_entities && (
                   <div className="mb-6">
