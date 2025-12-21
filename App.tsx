@@ -35,6 +35,9 @@ const SettingsIcon = () => (
 const ChevronDownIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
 );
+const ExpandIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg>
+);
 
 const App: React.FC = () => {
   const [user, setUser] = useState<any>(null);
@@ -767,6 +770,7 @@ const NewsCard: React.FC<{
   const [showXPost, setShowXPost] = useState(false);
   const [showTranslation, setShowTranslation] = useState(false);
   const [showFullSummary, setShowFullSummary] = useState(false);
+  const [showFullContent, setShowFullContent] = useState(false);
   
   const isPosted = entry.status === PostStatus.POSTED;
   const isDiscarded = entry.status === PostStatus.DISCARDED;
@@ -888,18 +892,221 @@ const NewsCard: React.FC<{
               entry.summary
             )}
           </p>
-          {/* Summary expand/collapse button */}
-          {((showTranslation && entry.summary_translation && entry.summary_translation.length > 200) || 
-            (!showTranslation && entry.summary && entry.summary.length > 200)) && (
+          {/* Summary expand/collapse button and full content button */}
+          <div className="flex items-center gap-3 mb-3">
+            {((showTranslation && entry.summary_translation && entry.summary_translation.length > 200) || 
+              (!showTranslation && entry.summary && entry.summary.length > 200)) && (
+              <button
+                onClick={() => setShowFullSummary(!showFullSummary)}
+                className="text-xs text-purple-400 hover:text-purple-300 transition-colors flex items-center gap-1"
+              >
+                <SparklesIcon />
+                {showFullSummary ? 'Show less' : 'Show full summary'}
+              </button>
+            )}
             <button
-              onClick={() => setShowFullSummary(!showFullSummary)}
-              className="text-xs text-purple-400 hover:text-purple-300 transition-colors flex items-center gap-1 mb-3"
+              onClick={() => setShowFullContent(true)}
+              className="text-xs text-cyan-400 hover:text-cyan-300 transition-colors flex items-center gap-1"
             >
-              <SparklesIcon />
-              {showFullSummary ? 'Show less' : 'Show full summary'}
+              <ExpandIcon />
+              Show full content
             </button>
-          )}
+          </div>
         </div>
+
+        {/* Full Content Modal */}
+        {showFullContent && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowFullContent(false)}>
+            <div 
+              className="bg-slate-900 border border-slate-700 rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden shadow-2xl animate-fade-in"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Modal Header */}
+              <div className="flex items-center justify-between p-4 border-b border-slate-800">
+                <div className="flex items-center gap-3">
+                  <a 
+                    href={entry.original_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="bg-slate-800 text-slate-300 text-xs font-bold px-3 py-1.5 rounded uppercase tracking-wider hover:bg-slate-700 hover:text-white transition-colors"
+                  >
+                    {entry.source}
+                  </a>
+                  <span className="text-sm text-slate-500">{new Date(entry.published_date).toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                  <span className={`text-[10px] px-2 py-0.5 rounded border ${
+                    entry.content_quality === 'high' ? 'border-green-800 text-green-400 bg-green-900/20' :
+                    entry.content_quality === 'medium' ? 'border-yellow-800 text-yellow-400 bg-yellow-900/20' :
+                    'border-red-800 text-red-400 bg-red-900/20'
+                  }`}>
+                    {entry.content_quality?.toUpperCase() || 'N/A'}
+                  </span>
+                </div>
+                <button 
+                  onClick={() => setShowFullContent(false)}
+                  className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
+                >
+                  <XIcon />
+                </button>
+              </div>
+              
+              {/* Modal Content */}
+              <div className="p-6 overflow-y-auto max-h-[calc(90vh-140px)]">
+                <h2 className="text-2xl font-bold text-white mb-4 leading-tight">{entry.title}</h2>
+                
+                {/* Summary Section */}
+                <div className="mb-6">
+                  <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-2">Summary</h3>
+                  <p className="text-slate-200 leading-relaxed">
+                    {showTranslation && entry.summary_translation ? (
+                      <span>
+                        <span className="text-blue-400 font-bold text-xs uppercase mr-2">[TR]</span>
+                        {entry.summary_translation}
+                      </span>
+                    ) : (
+                      entry.summary
+                    )}
+                  </p>
+                </div>
+
+                {/* Key Entities Section */}
+                {entry.key_entities && (
+                  <div className="mb-6">
+                    <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">Key Entities</h3>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                      {entry.key_entities.teams && entry.key_entities.teams.length > 0 && (
+                        <div className="bg-slate-800/50 p-3 rounded-lg">
+                          <span className="text-xs font-bold text-orange-400 uppercase">Teams</span>
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {entry.key_entities.teams.map((team, i) => (
+                              <span key={i} className="text-sm text-slate-300">{team}{i < entry.key_entities.teams.length - 1 ? ',' : ''}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {entry.key_entities.players && entry.key_entities.players.length > 0 && (
+                        <div className="bg-slate-800/50 p-3 rounded-lg">
+                          <span className="text-xs font-bold text-blue-400 uppercase">Players</span>
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {entry.key_entities.players.map((player, i) => (
+                              <span key={i} className="text-sm text-slate-300">{player}{i < entry.key_entities.players.length - 1 ? ',' : ''}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {entry.key_entities.competitions && entry.key_entities.competitions.length > 0 && (
+                        <div className="bg-slate-800/50 p-3 rounded-lg">
+                          <span className="text-xs font-bold text-green-400 uppercase">Competitions</span>
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {entry.key_entities.competitions.map((comp, i) => (
+                              <span key={i} className="text-sm text-slate-300">{comp}{i < entry.key_entities.competitions.length - 1 ? ',' : ''}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {entry.key_entities.locations && entry.key_entities.locations.length > 0 && (
+                        <div className="bg-slate-800/50 p-3 rounded-lg">
+                          <span className="text-xs font-bold text-purple-400 uppercase">Locations</span>
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {entry.key_entities.locations.map((loc, i) => (
+                              <span key={i} className="text-sm text-slate-300">{loc}{i < entry.key_entities.locations.length - 1 ? ',' : ''}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {entry.key_entities.amounts && entry.key_entities.amounts.length > 0 && (
+                        <div className="bg-slate-800/50 p-3 rounded-lg">
+                          <span className="text-xs font-bold text-yellow-400 uppercase">Amounts</span>
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {entry.key_entities.amounts.map((amt, i) => (
+                              <span key={i} className="text-sm text-slate-300">{amt}{i < entry.key_entities.amounts.length - 1 ? ',' : ''}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {entry.key_entities.dates && entry.key_entities.dates.length > 0 && (
+                        <div className="bg-slate-800/50 p-3 rounded-lg">
+                          <span className="text-xs font-bold text-red-400 uppercase">Dates</span>
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {entry.key_entities.dates.map((date, i) => (
+                              <span key={i} className="text-sm text-slate-300">{date}{i < entry.key_entities.dates.length - 1 ? ',' : ''}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Categories */}
+                <div className="mb-6">
+                  <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-2">Categories</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {entry.categories.map((cat, idx) => {
+                      const tag = typeof cat === 'string' ? cat : cat.tag;
+                      const confidence = typeof cat === 'object' ? cat.confidence : null;
+                      return (
+                        <span key={idx} className="px-3 py-1 bg-slate-800 text-slate-300 text-sm rounded-full border border-slate-700">
+                          #{tag}
+                          {confidence !== null && <span className="ml-1 text-slate-500 text-xs">({Math.round(confidence * 100)}%)</span>}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* X Post Section */}
+                {entry.x_post && (
+                  <div className="mb-6">
+                    <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-2">
+                      <TwitterIcon /> Generated X Post
+                    </h3>
+                    <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700">
+                      <p className="text-slate-200 whitespace-pre-wrap">{entry.x_post}</p>
+                      <span className={`text-xs mt-2 block ${entry.x_post.length > 280 ? 'text-red-400' : 'text-slate-500'}`}>
+                        {entry.x_post.length}/280 characters
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Metadata Section */}
+                <div className="bg-slate-800/30 p-4 rounded-lg border border-slate-800">
+                  <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">Article Metadata</h3>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div><span className="text-slate-500">Article ID:</span> <span className="text-slate-300 font-mono text-xs">{entry.article_id}</span></div>
+                    <div><span className="text-slate-500">Language:</span> <span className="text-slate-300">{entry.language?.toUpperCase()}</span></div>
+                    <div><span className="text-slate-500">Source Type:</span> <span className="text-slate-300">{entry.source_type || 'scraped'}</span></div>
+                    <div><span className="text-slate-500">Confidence:</span> <span className="text-slate-300">{entry.confidence ? `${Math.round(entry.confidence * 100)}%` : 'N/A'}</span></div>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Modal Footer */}
+              <div className="flex items-center justify-between p-4 border-t border-slate-800 bg-slate-900/50">
+                <div className="flex items-center gap-2">
+                  {entry.summary_translation && (
+                    <button 
+                      onClick={() => setShowTranslation(!showTranslation)}
+                      className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 ${showTranslation ? 'bg-blue-500/20 text-blue-400' : 'bg-slate-800 text-slate-400 hover:text-white'}`}
+                    >
+                      <TranslateIcon />
+                      {showTranslation ? 'Show Original' : 'Show Translation'}
+                    </button>
+                  )}
+                </div>
+                <a
+                  href={entry.original_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors"
+                >
+                  <ExternalLinkIcon />
+                  View Original Article
+                </a>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* X Post Section */}
         {showXPost && entry.x_post && (
