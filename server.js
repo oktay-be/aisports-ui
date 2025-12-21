@@ -577,6 +577,9 @@ app.get('/api/news', async (req, res) => {
               if (data.articles && Array.isArray(data.articles)) {
                 for (const article of data.articles) {
                   // Transform raw API article to match ProcessedArticle schema
+                  // Derive region from language: tr -> tr, everything else -> eu
+                  const lang = article.language || 'en';
+                  const region = article.region || (lang === 'tr' ? 'tr' : 'eu');
                   const transformedArticle = {
                     article_id: article.article_id || `api_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
                     original_url: article.url || article.original_url,
@@ -595,8 +598,8 @@ app.get('/api/news', async (req, res) => {
                     },
                     content_quality: article.content_quality || 'medium',
                     confidence: article.confidence || 0.5,
-                    language: article.language,
-                    region: article.region,
+                    language: lang,
+                    region: region,
                     summary_translation: article.summary_translation,
                     x_post: article.x_post,
                     source_type: 'api_raw'
