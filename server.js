@@ -578,7 +578,8 @@ app.get('/api/news', async (req, res) => {
                 for (const article of data.articles) {
                   // Transform raw API article to match ProcessedArticle schema
                   // Derive region from language: tr -> tr, everything else -> eu
-                  const lang = article.language || 'en';
+                  // Don't default language to 'en' - preserve actual language from source
+                  const lang = article.language || '';
                   const region = article.region || (lang === 'tr' ? 'tr' : 'eu');
                   const transformedArticle = {
                     article_id: article.article_id || `api_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
