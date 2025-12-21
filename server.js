@@ -523,7 +523,7 @@ app.get('/api/news', async (req, res) => {
                   title: article.title,
                   summary: article.summary,
                   source: article.source,
-                  published_date: article.published_date,
+                  publish_date: article.publish_date,
                   categories: article.categories || [],
                   key_entities: article.key_entities || {
                     teams: [],
@@ -583,7 +583,7 @@ app.get('/api/news', async (req, res) => {
                     title: article.title || 'Untitled',
                     summary: article.body || article.content || article.summary || article.description || '',
                     source: article.source || article.site || 'News API',
-                    published_date: article.published_at || article.published_date || new Date().toISOString(),
+                    publish_date: article.publish_date || new Date().toISOString(),
                     categories: article.categories || [],
                     key_entities: article.key_entities || {
                       teams: [],

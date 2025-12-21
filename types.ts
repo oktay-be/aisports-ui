@@ -29,7 +29,7 @@ export interface ProcessedArticle {
   summary: string;
   content?: string;  // Full article body
   source: string;
-  published_date: string;
+  publish_date: string;
   categories: CategoryAssignment[];
   key_entities: KeyEntities;
   content_quality: 'high' | 'medium' | 'low';

@@ -354,7 +354,7 @@ const App: React.FC = () => {
       }
 
       // Note: Date filtering is handled by the API (based on scraping date),
-      // not here (which would filter by article published_date).
+      // not here (which would filter by article publish_date).
       // Articles scraped on 2025-12-05 might have been published days earlier.
 
       return matchesSearch && matchesStatus && matchesTags && matchesSourceType;
@@ -832,7 +832,7 @@ const NewsCard: React.FC<{
             >
               {entry.source}
             </a>
-            <span className="text-xs text-slate-500">{timeAgo(entry.published_date)}</span>
+            <span className="text-xs text-slate-500">{timeAgo(entry.publish_date)}</span>
             {/* Source Type Badge - sphere with text on hover */}
             <span className={`group relative flex items-center gap-1 cursor-default`}>
               <span className={`w-2.5 h-2.5 rounded-full ${
@@ -935,7 +935,7 @@ const NewsCard: React.FC<{
                   >
                     {entry.source}
                   </a>
-                  <span className="text-sm text-slate-500">{new Date(entry.published_date).toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                  <span className="text-sm text-slate-500">{new Date(entry.publish_date).toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
                   <span className={`text-[10px] px-2 py-0.5 rounded border ${
                     entry.content_quality === 'high' ? 'border-green-800 text-green-400 bg-green-900/20' :
                     entry.content_quality === 'medium' ? 'border-yellow-800 text-yellow-400 bg-yellow-900/20' :
