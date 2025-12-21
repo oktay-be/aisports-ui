@@ -774,6 +774,9 @@ const NewsCard: React.FC<{
   const [showTranslation, setShowTranslation] = useState(false);
   const [showFullSummary, setShowFullSummary] = useState(false);
   const [showFullContent, setShowFullContent] = useState(false);
+  const [showIdPopup, setShowIdPopup] = useState(false);
+  const [showMergedUrls, setShowMergedUrls] = useState(false);
+  const [idCopied, setIdCopied] = useState(false);
   
   const isPosted = entry.status === PostStatus.POSTED;
   const isDiscarded = entry.status === PostStatus.DISCARDED;
@@ -860,15 +863,83 @@ const NewsCard: React.FC<{
               {entry.language?.toUpperCase() || 'TR'}
             </span>
             {entry.article_id && (
-              <button
-                onClick={() => {
-                  navigator.clipboard.writeText(entry.article_id!);
-                }}
-                className="text-[10px] px-1.5 py-0.5 rounded border border-slate-700 text-slate-400 bg-slate-800/50 hover:bg-slate-700 hover:text-slate-300 transition-colors cursor-pointer"
-                title={`Copy ID: ${entry.article_id}`}
-              >
-                ID
-              </button>
+              <div className="relative">
+                <button
+                  onClick={() => setShowIdPopup(!showIdPopup)}
+                  className="text-[10px] px-1.5 py-0.5 rounded border border-slate-700 text-slate-400 bg-slate-800/50 hover:bg-slate-700 hover:text-slate-300 transition-colors cursor-pointer"
+                  title="Show Article ID"
+                >
+                  ID
+                </button>
+                {showIdPopup && (
+                  <div className="absolute top-full left-0 mt-1 z-50 bg-slate-800 border border-slate-600 rounded-lg p-3 shadow-xl min-w-[280px]">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs text-slate-400">Article ID</span>
+                      <button
+                        onClick={() => setShowIdPopup(false)}
+                        className="text-slate-500 hover:text-slate-300 text-xs"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <code className="text-xs text-green-400 font-mono bg-slate-900 px-2 py-1 rounded flex-1 break-all">
+                        {entry.article_id}
+                      </code>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(entry.article_id!);
+                          setIdCopied(true);
+                          setTimeout(() => setIdCopied(false), 2000);
+                        }}
+                        className="text-xs px-2 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white transition-colors"
+                      >
+                        {idCopied ? '✓ Copied' : 'Copy'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            {entry.merged_from_urls && entry.merged_from_urls.length > 0 && (
+              <div className="relative">
+                <button
+                  onClick={() => setShowMergedUrls(!showMergedUrls)}
+                  className="text-[10px] px-1.5 py-0.5 rounded border border-purple-700 text-purple-400 bg-purple-900/20 hover:bg-purple-800/40 hover:text-purple-300 transition-colors cursor-pointer flex items-center gap-1"
+                  title="Show merged article URLs"
+                >
+                  <span>🔗</span>
+                  <span>{entry.merged_from_urls.length}</span>
+                </button>
+                {showMergedUrls && (
+                  <div className="absolute top-full left-0 mt-1 z-50 bg-slate-800 border border-slate-600 rounded-lg p-3 shadow-xl min-w-[350px] max-w-[500px]">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs text-purple-400 font-semibold">Merged From ({entry.merged_from_urls.length} URLs)</span>
+                      <button
+                        onClick={() => setShowMergedUrls(false)}
+                        className="text-slate-500 hover:text-slate-300 text-xs"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                      {entry.merged_from_urls.map((url, idx) => (
+                        <div key={idx} className="flex items-center gap-2">
+                          <span className="text-xs text-slate-500 w-4">{idx + 1}.</span>
+                          <a
+                            href={url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs text-blue-400 hover:text-blue-300 hover:underline break-all flex-1"
+                          >
+                            {url}
+                          </a>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
           </div>
           <a 
