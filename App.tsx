@@ -766,6 +766,7 @@ const NewsCard: React.FC<{
   const [showChat, setShowChat] = useState(false);
   const [showXPost, setShowXPost] = useState(false);
   const [showTranslation, setShowTranslation] = useState(false);
+  const [showFullSummary, setShowFullSummary] = useState(false);
   
   const isPosted = entry.status === PostStatus.POSTED;
   const isDiscarded = entry.status === PostStatus.DISCARDED;
@@ -877,7 +878,7 @@ const NewsCard: React.FC<{
         <h3 className="text-white font-bold text-lg mb-2 leading-tight">{entry.title}</h3>
         
         <div className="relative group/summary">
-          <p className="text-slate-300 text-sm leading-relaxed mb-4 transition-all duration-300">
+          <p className={`text-slate-300 text-sm leading-relaxed mb-2 transition-all duration-300 ${!showFullSummary ? 'line-clamp-3' : ''}`}>
             {showTranslation && entry.summary_translation ? (
               <span className="animate-fade-in">
                 <span className="text-blue-400 font-bold text-xs uppercase mr-2">[TR]</span>
@@ -887,6 +888,17 @@ const NewsCard: React.FC<{
               entry.summary
             )}
           </p>
+          {/* Summary expand/collapse button */}
+          {((showTranslation && entry.summary_translation && entry.summary_translation.length > 200) || 
+            (!showTranslation && entry.summary && entry.summary.length > 200)) && (
+            <button
+              onClick={() => setShowFullSummary(!showFullSummary)}
+              className="text-xs text-purple-400 hover:text-purple-300 transition-colors flex items-center gap-1 mb-3"
+            >
+              <SparklesIcon />
+              {showFullSummary ? 'Show less' : 'Show full summary'}
+            </button>
+          )}
         </div>
 
         {/* X Post Section */}
