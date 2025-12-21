@@ -311,7 +311,12 @@ const App: React.FC = () => {
 
   // Filtering Logic
   const filteredEntries = useMemo(() => {
-    return entries.filter(entry => {
+    console.log('[App] Filtering entries. Total:', entries.length);
+    console.log('[App] Current filters:', filters);
+    console.log('[App] Selected tags:', Array.from(selectedTags));
+    console.log('[App] Source type filter:', sourceTypeFilter);
+
+    return entries.filter((entry, index) => {
       const matchesSearch = entry.summary.toLowerCase().includes(filters.search.toLowerCase()) || 
                             entry.title.toLowerCase().includes(filters.search.toLowerCase()) ||
                             entry.source.toLowerCase().includes(filters.search.toLowerCase());
@@ -323,13 +328,25 @@ const App: React.FC = () => {
       const matchesTags = selectedTags.size === 0 ||
                           !entry.categories ||
                           entry.categories.length === 0 ||
-                          entry.categories.some(cat => selectedTags.has(cat));
+                          entry.categories.some(cat => selectedTags.has(typeof cat === 'string' ? cat : cat.tag));
 
-      // Source type filtering
+      // Source type filtering (only 'api' or 'scraped' are valid values)
       const entrySourceType = entry.source_type || 'scraped'; // Default to scraped for backward compatibility
       const matchesSourceType = (entrySourceType === 'scraped' && sourceTypeFilter.scraped) ||
                                  (entrySourceType === 'api' && sourceTypeFilter.api);
       
+      if (index < 3) {
+         console.log(`[App] Entry ${index} check:`, {
+            id: entry.id,
+            matchesSearch,
+            matchesStatus,
+            matchesTags,
+            matchesSourceType,
+            categories: entry.categories,
+            sourceType: entrySourceType
+         });
+      }
+
       // Note: Date filtering is handled by the API (based on scraping date),
       // not here (which would filter by article published_date).
       // Articles scraped on 2025-12-05 might have been published days earlier.

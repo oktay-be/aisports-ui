@@ -911,14 +911,19 @@ export const fetchNews = async (
         headers['X-API-Key'] = apiKey;
       }
 
+      console.log(`[fetchNews] Fetching from: ${url}`);
       const response = await fetch(url, { headers });
       
       if (!response.ok) {
-        console.warn(`API Error: ${response.status} ${response.statusText}`);
+        console.warn(`[fetchNews] API Error: ${response.status} ${response.statusText}`);
         return [];
       }
       
       const articles: ProcessedArticle[] = await response.json();
+      console.log(`[fetchNews] Raw articles received: ${articles.length}`);
+      if (articles.length > 0) {
+        console.log('[fetchNews] First article sample:', articles[0]);
+      }
 
       return articles.map((article, index) => ({
         ...article,
