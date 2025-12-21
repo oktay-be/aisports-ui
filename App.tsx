@@ -280,18 +280,21 @@ const App: React.FC = () => {
     loadData();
   }, [feedFilter]);
 
-  const loadData = async () => {
+  const loadData = async (forceRefresh: boolean = false) => {
     if (!token) return;
     setLoading(true);
     try {
-      console.log(`📡 Fetching data for ${filters.startDate} to ${filters.endDate}...`);
+      console.log(`📡 Fetching data for ${filters.startDate} to ${filters.endDate}${forceRefresh ? ' (force refresh)' : ''}...`);
 
       // Server-side caching handles everything now!
+      // When forceRefresh=true, pass no_cache to bypass server cache and fetch fresh GCS data
       const data = await fetchNews(
         selectedRegion,
         filters.startDate,
         filters.endDate,
-        token
+        token,
+        undefined,  // lastNDays
+        forceRefresh  // no_cache
       );
 
       setEntries(data);
@@ -483,7 +486,7 @@ const App: React.FC = () => {
              <span className="text-xs text-slate-500 hidden md:inline" title={lastUpdated.toLocaleString()}>
                Updated: {lastUpdated.toLocaleTimeString()}
              </span>
-             <button onClick={() => loadData()} className="p-2 hover:bg-slate-800 rounded-full transition-colors text-slate-400 hover:text-white" title="Refresh now">
+             <button onClick={() => loadData(true)} className="p-2 hover:bg-slate-800 rounded-full transition-colors text-slate-400 hover:text-white" title="Refresh now (force fetch from GCS)">
                <RefreshIcon />
              </button>
              

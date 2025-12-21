@@ -884,7 +884,8 @@ export const fetchNews = async (
   startDate?: string,
   endDate?: string,
   token?: string,
-  lastNDays?: number
+  lastNDays?: number,
+  noCache?: boolean
 ): Promise<NewsEntry[]> => {
     try {
       const apiUrl = import.meta.env.VITE_ARTICLE_API_URL;
@@ -901,6 +902,9 @@ export const fetchNews = async (
       }
       if (lastNDays) {
         url += `&last_n_days=${lastNDays}`;
+      }
+      if (noCache) {
+        url += `&no_cache=true`;
       }
 
       const headers: HeadersInit = {
