@@ -47,7 +47,7 @@ export interface ProcessedArticle {
     reason: string;
     group_id: number;
     merged_from_count?: number;
-    merged_urls?: string[];
+    merged_from_urls?: string[];
     group_size?: number;
   };
   _processing_metadata?: {
