@@ -22,7 +22,7 @@ export interface UserPreferences {
     searchType: string;
     dateRange?: {
       from: string;
-      string;
+      to: string;
     };
   };
   scraperConfig?: UserScraperConfig;

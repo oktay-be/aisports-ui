@@ -6,7 +6,7 @@
  */
 
 // API Configuration from environment
-const GCS_API_URL = import.meta.env.VITE_GCS_API_URL || import.meta.env.VITE_GCS_API_URL;
+const GCS_API_URL = import.meta.env.VITE_GCS_API_URL || '';
 const API_KEY = import.meta.env.VITE_GCS_API_KEY;
 
 /**
