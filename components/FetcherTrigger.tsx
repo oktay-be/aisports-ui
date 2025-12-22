@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { loadPreferences } from '../services/userPreferencesService';
+import { DEFAULT_SCRAPER_CONFIG } from '../scraper-config';
+import * as gcsApi from '../services/gcsApiService';
 
 const ChevronDownIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
@@ -13,8 +15,15 @@ interface FetcherTriggerProps {
   token?: string;
 }
 
+// Merge and deduplicate keywords from EU and TR defaults
+const getDefaultMergedKeywords = () => {
+  const euKeywords = DEFAULT_SCRAPER_CONFIG.eu.keywords;
+  const trKeywords = DEFAULT_SCRAPER_CONFIG.tr.keywords;
+  return [...new Set([...euKeywords, ...trKeywords])].sort().join(', ');
+};
+
 export const FetcherTrigger: React.FC<FetcherTriggerProps> = ({ token }) => {
-  const [keywordsInput, setKeywordsInput] = useState('');
+  const [keywordsInput, setKeywordsInput] = useState(getDefaultMergedKeywords());
   const [isExpanded, setIsExpanded] = useState(true);
   const [triggering, setTriggering] = useState(false);
   const [preferencesLoaded, setPreferencesLoaded] = useState(false);
@@ -26,15 +35,18 @@ export const FetcherTrigger: React.FC<FetcherTriggerProps> = ({ token }) => {
     const loadUserKeywords = async () => {
       try {
         const prefs = await loadPreferences(token);
-        const euKeywords = prefs.scraperConfig?.eu?.keywords || [];
-        const trKeywords = prefs.scraperConfig?.tr?.keywords || [];
+        
+        // Use preferences keywords if available, otherwise keep defaults
+        const euKeywords = prefs.scraperConfig?.eu?.keywords || DEFAULT_SCRAPER_CONFIG.eu.keywords;
+        const trKeywords = prefs.scraperConfig?.tr?.keywords || DEFAULT_SCRAPER_CONFIG.tr.keywords;
         
         // Merge and deduplicate keywords from both regions
         const merged = [...new Set([...euKeywords, ...trKeywords])].sort();
         setKeywordsInput(merged.join(', '));
-        console.log('Merged keywords from preferences:', merged);
+        console.log('Merged keywords for fetcher:', merged);
       } catch (error) {
         console.error('Failed to load user preferences:', error);
+        // Keep default keywords on error
       } finally {
         setPreferencesLoaded(true);
       }
@@ -53,28 +65,14 @@ export const FetcherTrigger: React.FC<FetcherTriggerProps> = ({ token }) => {
       .split(',')
       .map(k => k.trim())
       .filter(k => k.length > 0);
-    
-    const payload = {
-      keywords: allKeywords,
-      time_range: 'last_24_hours',
-      max_results: 50,
-    };
 
     try {
-      const response = await fetch('/api/trigger-news-api', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
+      const result = await gcsApi.triggerNewsApi(token, {
+        keywords: allKeywords,
+        time_range: 'last_24_hours',
+        max_results: 50,
       });
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const result = await response.json();
       console.log('✅ API Fetcher triggered successfully:', result);
       alert(`✅ API Fetcher triggered!\n\nKeywords: ${allKeywords.join(', ')}\nMessage ID: ${result.messageId}\n\nCheck Cloud Functions logs for execution.`);
     } catch (error: any) {

@@ -4,6 +4,7 @@ import { fetchNews } from './services/dataService';
 import { ScraperTrigger } from './components/ScraperTrigger';
 import { FetcherTrigger } from './components/FetcherTrigger';
 import { loadPreferences, savePreferences, UserPreferences, DEFAULT_PREFERENCES } from './services/userPreferencesService';
+import * as gcsApi from './services/gcsApiService';
 
 // --- Icons ---
 const RefreshIcon = () => (
@@ -134,26 +135,20 @@ const App: React.FC = () => {
             const credential = response.credential;
             const payload = JSON.parse(atob(credential.split('.')[1]));
 
-            // SECURITY: Verify with backend before allowing access
+            // SECURITY: Verify with GCS API before allowing access
             try {
-              const userResponse = await fetch('/api/user', {
-                headers: { 'Authorization': `Bearer ${credential}` }
-              });
-
-              if (!userResponse.ok) {
-                // User not allowed - show error
-                alert(`Access Denied: Your email (${payload.email}) is not in the allowed users list. Please contact the administrator.`);
-                setToken(null);
-                setUser(null);
-                return;
-              }
-
+              const userData = await gcsApi.getUser(credential);
+              
               // User is allowed - proceed with login
               setToken(credential);
-              setUser(payload);
-            } catch (error) {
+              setUser({ ...payload, isAdmin: userData.isAdmin });
+            } catch (error: any) {
               console.error('Authentication error:', error);
-              alert('Authentication failed. Please try again.');
+              if (error.message?.includes('not allowed') || error.message?.includes('403')) {
+                alert(`Access Denied: Your email (${payload.email}) is not in the allowed users list. Please contact the administrator.`);
+              } else {
+                alert('Authentication failed. Please try again.');
+              }
               setToken(null);
               setUser(null);
             }
@@ -192,29 +187,8 @@ const App: React.FC = () => {
     const loadUserInfo = async () => {
       try {
         // Load user info including admin status
-        const userResponse = await fetch('/api/user', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (userResponse.ok) {
-          const userData = await userResponse.json();
-          setIsAdmin(userData.isAdmin);
-        }
-
-        // If admin, load allowed users list for feed filter
-        const adminResponse = await fetch('/api/config/admin-users', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (adminResponse.ok) {
-          const adminData = await adminResponse.json();
-          // Load allowed users list
-          const allowedResponse = await fetch('/api/config/allowed-users', {
-            headers: { 'Authorization': `Bearer ${token}` }
-          });
-          if (allowedResponse.ok) {
-            const allowedData = await allowedResponse.json();
-            setAllowedUsers(allowedData.users || []);
-          }
-        }
+        const userData = await gcsApi.getUser(token);
+        setIsAdmin(userData.isAdmin);
 
         // Load user preferences
         const prefs = await loadPreferences(token);

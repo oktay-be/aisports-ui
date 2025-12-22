@@ -1,11 +1,12 @@
 /**
  * User Preferences Service
  * 
- * Handles loading and saving user preferences from/to GCS via the backend API.
+ * Handles loading and saving user preferences from/to GCS via the GCS API Cloud Function.
  * Preferences are stored per-user using email hash as the folder identifier.
  */
 
 import { ScraperRegionConfig, ScraperSource } from '../scraper-config';
+import * as gcsApi from './gcsApiService';
 
 // Scraper config stored per user (keywords, sources, scrapeDepth for each region)
 export interface UserScraperConfig {
@@ -21,7 +22,7 @@ export interface UserPreferences {
     searchType: string;
     dateRange?: {
       from: string;
-      to: string;
+      string;
     };
   };
   scraperConfig?: UserScraperConfig;
@@ -40,36 +41,18 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
 };
 
 /**
- * Load user preferences from the backend
+ * Load user preferences from the GCS API
  * @param token - Google OAuth access token
  * @returns User preferences or default preferences if not found
  */
 export async function loadPreferences(token: string): Promise<UserPreferences> {
   try {
-    const response = await fetch('/api/user/preferences', {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (response.status === 404) {
-      // No preferences found, return defaults
-      console.log('No saved preferences found, using defaults');
-      return DEFAULT_PREFERENCES;
-    }
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to load preferences');
-    }
-
-    const data = await response.json();
-    // Server returns the full preferences object directly
+    const data = await gcsApi.getPreferences(token);
+    
+    // Map API response to UserPreferences format
     return {
       ...DEFAULT_PREFERENCES,
-      scraperConfig: data.scraperConfig,
+      scraperConfig: data.scraperConfig || undefined,
       feedFilter: data.feedSettings?.feedFilter || DEFAULT_PREFERENCES.feedFilter,
     };
   } catch (error) {
@@ -80,7 +63,7 @@ export async function loadPreferences(token: string): Promise<UserPreferences> {
 }
 
 /**
- * Save user preferences to the backend
+ * Save user preferences to the GCS API
  * @param token - Google OAuth access token
  * @param preferences - Preferences to save
  * @returns Success status
@@ -90,24 +73,12 @@ export async function savePreferences(
   preferences: UserPreferences
 ): Promise<boolean> {
   try {
-    const response = await fetch('/api/user/preferences', {
-      method: 'PUT',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
+    await gcsApi.savePreferences(token, {
+      scraperConfig: preferences.scraperConfig || null,
+      feedSettings: {
+        feedFilter: preferences.feedFilter,
       },
-      body: JSON.stringify({
-        scraperConfig: preferences.scraperConfig,
-        feedSettings: {
-          feedFilter: preferences.feedFilter,
-        },
-      }),
     });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to save preferences');
-    }
 
     console.log('Preferences saved successfully');
     return true;

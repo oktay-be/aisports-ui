@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { DEFAULT_SCRAPER_CONFIG, ScraperRegionConfig } from '../scraper-config';
 import { loadPreferences, savePreferences, UserPreferences, UserScraperConfig, saveScraperConfigDebounced } from '../services/userPreferencesService';
+import * as gcsApi from '../services/gcsApiService';
 
 const ChevronDownIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
@@ -296,42 +297,25 @@ export const ScraperTrigger: React.FC<{ token?: string }> = ({ token }) => {
   }, [token, euConfig, trConfig]);
 
   const handleTrigger = async (region: 'eu' | 'tr') => {
+    if (!token) return;
+    
     setTriggering(region);
     
     const config = region === 'eu' ? euConfig : trConfig;
     const enabledSources = config.sources.filter(s => s.enabled);
-    
-    const payload = {
-      keywords: config.keywords,
-      urls: enabledSources.map(s => s.url),
-      scrape_depth: config.scrapeDepth,
-      persist: false,
-      log_level: 'INFO',
-      region,
-    };
 
     try {
-      // Build headers with auth token
-      const headers: HeadersInit = { 'Content-Type': 'application/json' };
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-
-      // Call the API endpoint to trigger Cloud Function via Pub/Sub
-      const response = await fetch('/api/trigger-scraper', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(payload),
+      const result = await gcsApi.triggerScraper(token, {
+        keywords: config.keywords,
+        urls: enabledSources.map(s => s.url),
+        region,
+        scrape_depth: config.scrapeDepth,
+        persist: false,
       });
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const result = await response.json();
       console.log(`✅ Scraper triggered successfully:`, result);
       alert(`✅ ${region.toUpperCase()} scraper triggered!\n\nMessage ID: ${result.messageId}\nSources: ${result.sourcesCount}\n\nCheck Cloud Functions logs for execution.`);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to trigger scraper:', error);
       alert(`❌ Failed to trigger ${region.toUpperCase()} scraper:\n${error.message}`);
     } finally {

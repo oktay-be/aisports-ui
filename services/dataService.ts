@@ -888,11 +888,11 @@ export const fetchNews = async (
   noCache?: boolean
 ): Promise<NewsEntry[]> => {
     try {
-      const apiUrl = import.meta.env.VITE_ARTICLE_API_URL;
-      const apiKey = import.meta.env.VITE_ARTICLE_API_KEY;
+      const apiUrl = import.meta.env.VITE_GCS_API_URL;
+      const apiKey = import.meta.env.VITE_GCS_API_KEY;
 
       if (!apiUrl) {
-        console.error('VITE_ARTICLE_API_URL is not configured');
+        console.error('VITE_GCS_API_URL is not configured');
         return [];
       }
 

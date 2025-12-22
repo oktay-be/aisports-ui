@@ -56,8 +56,8 @@ jobs:
       env:
         VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
         VITE_HISTORICAL_DEPTH: ${{ vars.VITE_HISTORICAL_DEPTH }}
-        VITE_ARTICLE_API_URL: ${{ secrets.VITE_ARTICLE_API_URL }}
-        VITE_ARTICLE_API_KEY: ${{ secrets.VITE_ARTICLE_API_KEY }}
+        VITE_GCS_API_URL: ${{ secrets.VITE_GCS_API_URL }}
+        VITE_GCS_API_KEY: ${{ secrets.VITE_GCS_API_KEY }}
 
     - name: Authenticate to Google Cloud (Workload Identity Federation)
       uses: google-github-actions/auth@v2
