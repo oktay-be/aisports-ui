@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { NewsEntry, PostStatus, FilterState, GeminiAnalysis, SourceRegion } from './types';
 import { fetchNews } from './services/dataService';
 import { ScraperTrigger } from './components/ScraperTrigger';
+import { FetcherTrigger } from './components/FetcherTrigger';
 import { loadPreferences, savePreferences, UserPreferences, DEFAULT_PREFERENCES } from './services/userPreferencesService';
 
 // --- Icons ---
@@ -48,7 +49,6 @@ const App: React.FC = () => {
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [activeTab, setActiveTab] = useState<'feed' | 'scraper' | 'fetcher'>('feed');
-  const [fetcherLoading, setFetcherLoading] = useState(false);
   const [showTagSettings, setShowTagSettings] = useState(false);
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [sourceTypeFilter, setSourceTypeFilter] = useState<{ scraped: boolean; api: boolean }>({ scraped: true, api: true });
@@ -415,45 +415,12 @@ const App: React.FC = () => {
                 Scraper
               </button>
               <button
-                onClick={async () => {
-                  setFetcherLoading(true);
-                  try {
-                    // Fetch config from GCS
-                    const configRes = await fetch('/api/config/news-api', {
-                      headers: { 'Authorization': `Bearer ${token}` }
-                    });
-
-                    if (!configRes.ok) throw new Error('Failed to load config');
-                    const config = await configRes.json();
-
-                    // Trigger with config values
-                    const res = await fetch('/api/trigger-news-api', {
-                      method: 'POST',
-                      headers: {
-                        'Authorization': `Bearer ${token}`,
-                        'Content-Type': 'application/json'
-                      },
-                      body: JSON.stringify({
-                        keywords: config.default_keywords,
-                        time_range: config.default_time_range,
-                        max_results: config.default_max_results
-                      })
-                    });
-                    if (!res.ok) throw new Error('Failed to trigger fetcher');
-                    alert('Fetcher triggered successfully!');
-                  } catch (e) {
-                    alert('Failed to trigger fetcher.');
-                  } finally {
-                    setFetcherLoading(false);
-                  }
-                }}
-                className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors flex items-center gap-2 ${
-                  fetcherLoading ? 'bg-blue-900 text-blue-300' : 'text-slate-400 hover:text-white'
+                onClick={() => setActiveTab('fetcher')}
+                className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                  activeTab === 'fetcher' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'
                 }`}
-                disabled={fetcherLoading}
               >
                 Fetcher
-                {fetcherLoading && <span className="ml-1 animate-spin">⏳</span>}
               </button>
             </div>
           </div>
@@ -580,6 +547,8 @@ const App: React.FC = () => {
         
         {activeTab === 'scraper' ? (
           <ScraperTrigger token={token || undefined} />
+        ) : activeTab === 'fetcher' ? (
+          <FetcherTrigger token={token || undefined} />
         ) : (
           <>
         {/* Prefetch & Cache Indicator */}
