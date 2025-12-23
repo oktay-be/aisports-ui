@@ -3,11 +3,13 @@ name: Deploy UI to Cloud Run
 # Required GitHub Actions Variables:
 # - VITE_GOOGLE_CLIENT_ID: Google OAuth Client ID
 # - VITE_HISTORICAL_FETCH_DEPTH: Number of days of historical data to prefetch on login (default: 3)
-#   To set: gh variable set VITE_HISTORICAL_FETCH_DEPTH --body "3" --repo <your-repo>
+# - VITE_GCS_API_URL (secret): GCS API function URL
+# - VITE_GCS_API_KEY (secret): API key for GCS API function
 #
-# Other required variables:
-# - GCP_PROJECT_NUMBER, GCP_SERVICE_ACCOUNT, WIF_POOL_ID, WIF_PROVIDER_ID
-# - GOOGLE_CLOUD_PROJECT, GCS_BUCKET_NAME, SCRAPING_REQUEST_TOPIC, REGION
+# Infrastructure variables:
+# - GCP_PROJECT_NUMBER, GCP_SERVICE_ACCOUNT, WIF_POOL_ID, WIF_PROVIDER_ID, REGION
+#
+# Note: server.js is now a minimal static file server. All API calls go to gcs_api_function.
 
 on:
   push:
@@ -73,15 +75,11 @@ jobs:
         region: ${{ vars.REGION }}
         source: .
         env_vars: |
-          GOOGLE_CLOUD_PROJECT=${{ vars.GOOGLE_CLOUD_PROJECT }}
-          GCS_BUCKET_NAME=${{ vars.GCS_BUCKET_NAME }}
-          SCRAPING_REQUEST_TOPIC=${{ vars.SCRAPING_REQUEST_TOPIC }}
-          GOOGLE_CLIENT_ID=${{ vars.VITE_GOOGLE_CLIENT_ID }}
           NODE_ENV=production
         flags: |
           --allow-unauthenticated
           --service-account=${{ vars.GCP_SERVICE_ACCOUNT }}
-          --memory=512Mi
+          --memory=256Mi
           --cpu=1
           --timeout=60
           --min-instances=0
