@@ -4,7 +4,37 @@ export enum PostStatus {
   DISCARDED = 'DISCARDED'
 }
 
-export type SourceRegion = 'eu' | 'tr';
+export type SourceRegion = 'eu' | 'tr' | 'diff';
+
+export interface DiffArticle {
+  article_id: string;
+  title: string;
+  url: string;
+  source: string;
+  published_at: string;
+  max_similarity: number;
+  closest_match: {
+    article_id: string;
+    title: string;
+    url: string;
+  } | null;
+}
+
+export interface DiffResult {
+  metadata: {
+    region1: string;
+    region2: string;
+    run_folder: string;
+    diff_threshold: number;
+    generated_at: string;
+  };
+  summary: {
+    total_region1_articles: number;
+    total_region2_articles: number;
+    unique_to_region1: number;
+  };
+  unique_articles: DiffArticle[];
+}
 
 export interface KeyEntities {
   teams: string[];

@@ -1,4 +1,4 @@
-import { NewsEntry, PostStatus, SourceRegion, ProcessedArticle } from '../types';
+import { NewsEntry, PostStatus, SourceRegion, ProcessedArticle, DiffArticle, DiffResult } from '../types';
 
 const MOCK_ARTICLES: ProcessedArticle[] = [
     {
@@ -938,4 +938,56 @@ export const fetchNews = async (
       console.error("Failed to fetch news:", error);
       throw error; // Re-throw to handle in UI
     }
+};
+
+export const fetchDiffArticles = async (
+  startDate?: string,
+  endDate?: string,
+  lastNDays?: number,
+  noCache?: boolean
+): Promise<DiffResult | null> => {
+  try {
+    const apiUrl = import.meta.env.VITE_GCS_API_URL;
+    const apiKey = import.meta.env.VITE_GCS_API_KEY;
+
+    if (!apiUrl) {
+      console.error('VITE_GCS_API_URL is not configured');
+      return null;
+    }
+
+    let url = `${apiUrl}?region=diff`;
+    if (startDate && endDate) {
+      url += `&startDate=${startDate}&endDate=${endDate}`;
+    }
+    if (lastNDays) {
+      url += `&last_n_days=${lastNDays}`;
+    }
+    if (noCache) {
+      url += `&no_cache=true`;
+    }
+
+    const headers: HeadersInit = {
+      'Content-Type': 'application/json'
+    };
+
+    if (apiKey) {
+      headers['X-API-Key'] = apiKey;
+    }
+
+    console.log(`[fetchDiffArticles] Fetching from: ${url}`);
+    const response = await fetch(url, { headers });
+
+    if (!response.ok) {
+      console.warn(`[fetchDiffArticles] API Error: ${response.status} ${response.statusText}`);
+      return null;
+    }
+
+    const result: DiffResult = await response.json();
+    console.log(`[fetchDiffArticles] Diff result received:`, result.summary);
+
+    return result;
+  } catch (error) {
+    console.error("Failed to fetch diff articles:", error);
+    return null;
+  }
 };

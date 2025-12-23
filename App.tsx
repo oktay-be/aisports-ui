@@ -406,11 +406,18 @@ const App: React.FC = () => {
                >
                  EU
                </button>
-               <button 
+               <button
                  onClick={() => setSelectedRegion('tr')}
                  className={`px-3 py-1 text-xs font-bold rounded-md transition-colors ${selectedRegion === 'tr' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}
                >
                  TR
+               </button>
+               <button
+                 onClick={() => setSelectedRegion('diff')}
+                 className={`px-3 py-1 text-xs font-bold rounded-md transition-colors ${selectedRegion === 'diff' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'}`}
+                 title="EU articles not covered in TR"
+               >
+                 DIFF
                </button>
              </div>
              <button 
