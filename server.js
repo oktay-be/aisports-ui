@@ -407,150 +407,9 @@ app.get('/api/config/news-api', async (req, res) => {
   }
 });
 
-// --- DIFF REGION HANDLER ---
-// Fetches region diff analysis files (EU articles not covered in TR)
-async function handleDiffRequest(_req, res, startDate, endDate, lastNDays) {
-  try {
-    // Helper: Generate array of dates between start and end (inclusive)
-    const getDateRange = (start, end) => {
-      const dates = [];
-      const currentDate = new Date(start);
-      const endDateObj = new Date(end);
-      while (currentDate <= endDateObj) {
-        dates.push(currentDate.toISOString().split('T')[0]);
-        currentDate.setDate(currentDate.getDate() + 1);
-      }
-      return dates;
-    };
-
-    // Helper: Get today's date
-    const getTodayDate = () => {
-      return new Date().toISOString().split('T')[0];
-    };
-
-    // Determine which dates to fetch
-    let datesToFetch = [];
-    if (startDate && endDate) {
-      datesToFetch = getDateRange(startDate, endDate);
-    } else if (lastNDays > 0) {
-      const today = new Date();
-      const endDateObj = today;
-      const startDateObj = new Date(today);
-      startDateObj.setDate(startDateObj.getDate() - lastNDays + 1);
-      datesToFetch = getDateRange(
-        startDateObj.toISOString().split('T')[0],
-        endDateObj.toISOString().split('T')[0]
-      );
-    } else {
-      // Default: today only
-      datesToFetch = [getTodayDate()];
-    }
-
-    console.log(`📅 [DIFF] Requested dates: ${datesToFetch.join(', ')}`);
-
-    // Collect all diff results
-    const allDiffResults = {
-      metadata: {
-        region1: 'eu',
-        region2: 'tr',
-        dates: datesToFetch,
-        generated_at: new Date().toISOString()
-      },
-      summary: {
-        total_region1_articles: 0,
-        total_region2_articles: 0,
-        unique_to_region1: 0
-      },
-      unique_articles: []
-    };
-
-    // Fetch diff files for each date
-    for (const date of datesToFetch) {
-      const diffPrefix = `ingestion/${date}/`;
-      console.log(`📂 [DIFF] Searching for diff files: ${diffPrefix}`);
-
-      try {
-        const [allFiles] = await storage.bucket(BUCKET_NAME).getFiles({
-          prefix: diffPrefix
-        });
-
-        // Find region_diff files in analysis folders
-        const diffFiles = allFiles.filter(f =>
-          f.name.includes('/analysis/region_diff_') && f.name.endsWith('.json')
-        );
-
-        console.log(`  Found ${diffFiles.length} diff files`);
-
-        for (const file of diffFiles) {
-          try {
-            const [content] = await file.download();
-            const diffData = JSON.parse(content.toString());
-
-            // Aggregate summaries
-            if (diffData.summary) {
-              allDiffResults.summary.total_region1_articles += diffData.summary.total_region1_articles || 0;
-              allDiffResults.summary.total_region2_articles += diffData.summary.total_region2_articles || 0;
-              allDiffResults.summary.unique_to_region1 += diffData.summary.unique_to_region1 || 0;
-            }
-
-            // Collect unique articles
-            if (diffData.unique_articles && Array.isArray(diffData.unique_articles)) {
-              allDiffResults.unique_articles.push(...diffData.unique_articles);
-            }
-
-            console.log(`  ✅ ${file.name}: ${diffData.unique_articles?.length || 0} unique articles`);
-          } catch (err) {
-            console.error(`  ❌ Error processing ${file.name}:`, err.message);
-          }
-        }
-      } catch (err) {
-        console.error(`  ❌ Error fetching diff files for ${date}:`, err.message);
-      }
-    }
-
-    // Deduplicate by article_id
-    const seenIds = new Set();
-    allDiffResults.unique_articles = allDiffResults.unique_articles.filter(article => {
-      const id = article.article_id;
-      if (id && !seenIds.has(id)) {
-        seenIds.add(id);
-        return true;
-      }
-      return false;
-    });
-
-    console.log(`📊 [DIFF] Total unique articles: ${allDiffResults.unique_articles.length}`);
-
-    // Transform diff articles to NewsEntry-compatible format for UI
-    const newsEntries = allDiffResults.unique_articles.map((article) => ({
-      article_id: article.article_id,
-      original_url: article.url,
-      title: article.title,
-      summary: `[EU-only, similarity: ${(article.max_similarity * 100).toFixed(0)}%] ${article.closest_match ? `Closest TR: "${article.closest_match.title?.substring(0, 50)}..."` : 'No TR match found'}`,
-      source: article.source,
-      publish_date: article.published_at,
-      categories: [],
-      key_entities: { teams: [], players: [], amounts: [], dates: [], competitions: [], locations: [] },
-      content_quality: 'medium',
-      confidence: 1 - article.max_similarity, // Higher confidence = more unique
-      language: 'en',
-      region: 'diff',
-      source_type: 'diff',
-      // Diff-specific fields
-      _diff_metadata: {
-        max_similarity: article.max_similarity,
-        closest_match: article.closest_match
-      }
-    }));
-
-    return res.json(newsEntries);
-  } catch (error) {
-    console.error('[DIFF] Error:', error);
-    return res.status(500).json({ error: 'Failed to fetch diff data', details: error.message });
-  }
-}
-
 // GET /api/news
+// NOTE: Diff region (region=diff) is now served by gcs_api_function, not this server.
+// The UI's fetchDiffArticles() should use VITE_GCS_API_URL for diff data.
 app.get('/api/news', async (req, res) => {
   if (!BUCKET_NAME) {
     return res.status(500).json({ error: 'GCS_BUCKET_NAME not configured' });
@@ -561,11 +420,6 @@ app.get('/api/news', async (req, res) => {
     const startDate = req.query.startDate; // YYYY-MM-DD
     const endDate = req.query.endDate; // YYYY-MM-DD
     const lastNDays = parseInt(req.query.last_n_days || '0');
-
-    // --- SPECIAL HANDLING FOR DIFF REGION ---
-    if (region === 'diff') {
-      return await handleDiffRequest(req, res, startDate, endDate, lastNDays);
-    }
 
     // Helper: Generate array of dates between start and end (inclusive)
     const getDateRange = (start, end) => {

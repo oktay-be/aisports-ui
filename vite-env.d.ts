@@ -2,7 +2,7 @@
 
 interface ImportMetaEnv {
   readonly VITE_GOOGLE_CLIENT_ID: string;
-  readonly VITE_HISTORICAL_DEPTH?: string;
+  readonly VITE_HISTORICAL_FETCH_DEPTH?: string;
 }
 
 interface ImportMeta {
