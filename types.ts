@@ -67,6 +67,7 @@ export interface ProcessedArticle {
   language: string;
   summary_translation?: string;
   x_post?: string;
+  keywords_used?: string[];  // Keywords that matched this article (for highlighting)
   _grouping_metadata?: {
     group_id: number;
     group_size: number;

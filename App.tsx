@@ -711,6 +711,36 @@ const App: React.FC = () => {
   );
 };
 
+// Helper function to highlight keywords in text
+const highlightKeywords = (text: string, keywords: string[] = []): React.ReactNode => {
+  if (!keywords || keywords.length === 0 || !text) {
+    return text;
+  }
+
+  // Create a regex pattern that matches any of the keywords (case-insensitive)
+  const escapedKeywords = keywords.map(kw => kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const pattern = new RegExp(`(${escapedKeywords.join('|')})`, 'gi');
+
+  // Split text by the pattern, keeping the matched parts
+  const parts = text.split(pattern);
+
+  return parts.map((part, index) => {
+    // Check if this part matches any keyword (case-insensitive)
+    const isKeyword = keywords.some(kw => kw.toLowerCase() === part.toLowerCase());
+    if (isKeyword) {
+      return (
+        <mark
+          key={index}
+          className="bg-yellow-500/30 text-yellow-200 px-0.5 rounded font-semibold"
+        >
+          {part}
+        </mark>
+      );
+    }
+    return part;
+  });
+};
+
 const NewsCard: React.FC<{
   entry: NewsEntry;
   onPost: (id: string) => void;
@@ -995,9 +1025,25 @@ const NewsCard: React.FC<{
                 {/* Full Content Section */}
                 {entry.content && (
                   <div className="mb-6">
-                    <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-2">Full Article Content</h3>
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">Full Article Content</h3>
+                      {entry.keywords_used && entry.keywords_used.length > 0 && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-slate-500">Matched keywords:</span>
+                          <div className="flex gap-1">
+                            {entry.keywords_used.map((kw, idx) => (
+                              <span key={idx} className="text-xs px-1.5 py-0.5 bg-yellow-500/20 text-yellow-300 rounded border border-yellow-600/30">
+                                {kw}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                     <div className="bg-slate-800/30 p-4 rounded-lg border border-slate-700 max-h-96 overflow-y-auto">
-                      <p className="text-slate-300 leading-relaxed whitespace-pre-wrap">{entry.content}</p>
+                      <p className="text-slate-300 leading-relaxed whitespace-pre-wrap">
+                        {highlightKeywords(entry.content, entry.keywords_used)}
+                      </p>
                     </div>
                   </div>
                 )}
