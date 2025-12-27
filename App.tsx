@@ -282,6 +282,12 @@ const App: React.FC = () => {
 
       setEntries(data);
       setLastUpdated(new Date());
+
+      // On force refresh, reset tag filter so all new tags are auto-selected
+      if (forceRefresh) {
+        setUserModifiedTags(false);
+      }
+
       console.log(`✅ Loaded ${data.length} articles`);
     } catch (e) {
       console.error(e);
@@ -443,7 +449,7 @@ const App: React.FC = () => {
              <span className="text-xs text-slate-500 hidden md:inline" title={lastUpdated.toLocaleString()}>
                Updated: {lastUpdated.toLocaleTimeString()}
              </span>
-             <button onClick={() => loadData(true)} className="p-2 hover:bg-slate-800 rounded-full transition-colors text-slate-400 hover:text-white" title="Refresh now (force fetch from GCS)">
+             <button onClick={() => { setActiveTab('feed'); loadData(true); }} className="p-2 hover:bg-slate-800 rounded-full transition-colors text-slate-400 hover:text-white" title="Refresh now (force fetch from GCS)">
                <RefreshIcon />
              </button>
              
