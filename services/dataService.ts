@@ -932,7 +932,7 @@ export const fetchNews = async (
       return articles.map((article, index) => ({
         ...article,
         id: `entry-${region}-${index}`,
-        status: Math.random() > 0.8 ? PostStatus.POSTED : PostStatus.PENDING
+        status: PostStatus.PENDING
       }));
     } catch (error) {
       console.error("Failed to fetch news:", error);

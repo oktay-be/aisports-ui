@@ -50,8 +50,9 @@ const App: React.FC = () => {
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [activeTab, setActiveTab] = useState<'feed' | 'scraper' | 'fetcher'>('feed');
-  const [showTagSettings, setShowTagSettings] = useState(false);
+  const [showTagSettings, setShowTagSettings] = useState(true);
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
+  const [userModifiedTags, setUserModifiedTags] = useState(false);
   const [sourceTypeFilter, setSourceTypeFilter] = useState<{ scraped: boolean; api: boolean }>({ scraped: true, api: true });
   
   // Multi-user state
@@ -92,14 +93,15 @@ const App: React.FC = () => {
     return Array.from(tags).sort();
   }, [entries]);
 
-  // Update selectedTags when entries change (select all by default)
+  // Auto-select all tags only on initial load, not after user manually changes tags
   useEffect(() => {
-    if (allTags.length > 0) {
+    if (allTags.length > 0 && !userModifiedTags) {
       setSelectedTags(new Set(allTags));
     }
-  }, [allTags.join(',')]);
+  }, [allTags.join(','), userModifiedTags]);
 
   const toggleTag = (tag: string) => {
+    setUserModifiedTags(true);
     setSelectedTags(prev => {
       const newSet = new Set(prev);
       if (newSet.has(tag)) {
@@ -111,8 +113,15 @@ const App: React.FC = () => {
     });
   };
 
-  const selectAllTags = () => setSelectedTags(new Set(allTags));
-  const clearAllTags = () => setSelectedTags(new Set());
+  const selectAllTags = () => {
+    setUserModifiedTags(true);
+    setSelectedTags(new Set(allTags));
+  };
+
+  const clearAllTags = () => {
+    setUserModifiedTags(true);
+    setSelectedTags(new Set());
+  };
 
   // Close user menu when clicking outside
   useEffect(() => {
@@ -303,12 +312,12 @@ const App: React.FC = () => {
       
       const matchesStatus = filters.status === 'ALL' ? true : entry.status === filters.status;
 
-      // Tag filtering: entry must have at least one category that is selected
-      // OR have no categories (uncategorized articles should always show)
-      const matchesTags = selectedTags.size === 0 ||
+      // Tag filtering: when no tags selected, show nothing (Clear All hides all)
+      // When tags selected, show uncategorized articles + articles with matching categories
+      const matchesTags = selectedTags.size > 0 && (
                           !entry.categories ||
                           entry.categories.length === 0 ||
-                          entry.categories.some(cat => selectedTags.has(typeof cat === 'string' ? cat : cat.tag));
+                          entry.categories.some(cat => selectedTags.has(typeof cat === 'string' ? cat : cat.tag)));
 
       // Source type filtering (only 'api' or 'scraped' are valid values)
       const entrySourceType = entry.source_type || 'scraped'; // Default to scraped for backward compatibility
@@ -757,7 +766,8 @@ const NewsCard: React.FC<{
   const [showIdPopup, setShowIdPopup] = useState(false);
   const [showMergedUrls, setShowMergedUrls] = useState(false);
   const [idCopied, setIdCopied] = useState(false);
-  
+  const [showAllTags, setShowAllTags] = useState(false);
+
   const isPosted = entry.status === PostStatus.POSTED;
   const isDiscarded = entry.status === PostStatus.DISCARDED;
   
@@ -921,13 +931,32 @@ const NewsCard: React.FC<{
                 )}
               </div>
             )}
+            {/* Diff Article Metadata */}
+            {entry._diff_metadata && (
+              <>
+                <span className="text-[10px] px-1.5 py-0.5 rounded border border-purple-700 text-purple-400 bg-purple-900/20">
+                  {Math.round(entry._diff_metadata.max_similarity * 100)}% similar
+                </span>
+                {entry._diff_metadata.closest_match && (
+                  <a
+                    href={entry._diff_metadata.closest_match.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[10px] text-cyan-400 hover:text-cyan-300 hover:underline cursor-pointer"
+                    title={`Closest TR article: ${entry._diff_metadata.closest_match.title}`}
+                  >
+                    → {entry._diff_metadata.closest_match.article_id.slice(0, 8)}...
+                  </a>
+                )}
+              </>
+            )}
           </div>
-          <a 
-            href={entry.original_url} 
-            target="_blank" 
+          <a
+            href={entry._diff_metadata?.closest_match?.url || entry.original_url}
+            target="_blank"
             rel="noopener noreferrer"
             className="text-slate-500 hover:text-blue-400 transition-colors"
-            title="View Original Source"
+            title={entry._diff_metadata ? "View Closest TR Article" : "View Original Source"}
           >
             <ExternalLinkIcon />
           </a>
@@ -1206,7 +1235,7 @@ const NewsCard: React.FC<{
 
         {/* Categories/Tags */}
         <div className="flex flex-wrap gap-1.5 mb-4">
-          {entry.categories.slice(0, 3).map((cat, idx) => {
+          {(showAllTags ? entry.categories : entry.categories.slice(0, 7)).map((cat, idx) => {
             const tag = typeof cat === 'string' ? cat : cat.tag;
             return (
               <span key={idx} className="px-2 py-0.5 bg-slate-800 text-slate-400 text-[10px] rounded-full border border-slate-700">
@@ -1214,8 +1243,13 @@ const NewsCard: React.FC<{
               </span>
             );
           })}
-          {entry.categories.length > 3 && (
-            <span className="px-2 py-0.5 text-slate-500 text-[10px]">+{entry.categories.length - 3}</span>
+          {entry.categories.length > 7 && (
+            <button
+              onClick={() => setShowAllTags(!showAllTags)}
+              className="px-2 py-0.5 text-blue-400 hover:text-blue-300 text-[10px] cursor-pointer"
+            >
+              {showAllTags ? 'show less' : `+${entry.categories.length - 7} more`}
+            </button>
           )}
         </div>
 

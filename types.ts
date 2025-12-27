@@ -90,6 +90,16 @@ export interface ProcessedArticle {
     group_id?: number;
   };
   source_type?: 'scraped' | 'api' | 'processed';
+  _diff_metadata?: {
+    max_similarity: number;
+    closest_match: {
+      article_id: string;
+      title: string;
+      url: string;
+    } | null;
+    closest_match_url: string;
+    original_region: string;
+  };
 }
 
 export interface NewsEntry extends ProcessedArticle {
