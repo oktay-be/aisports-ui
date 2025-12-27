@@ -245,6 +245,11 @@ const App: React.FC = () => {
     loadData();
   }, [selectedRegion, filters.startDate, filters.endDate, token]);
 
+  // Reset tag filter when region changes so new tags are auto-selected
+  useEffect(() => {
+    setUserModifiedTags(false);
+  }, [selectedRegion]);
+
   // Auto-refresh every 2 minutes when enabled
   useEffect(() => {
     if (!autoRefresh || !token) return;
