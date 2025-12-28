@@ -30,8 +30,9 @@ on:
   workflow_dispatch:
 
 permissions:
-  id-token: write # This is crucial for Workload Identity Federation
-  contents: read # Allow checkout action to read the repository
+  id-token: write      # Required for Workload Identity Federation
+  contents: read       # Required to checkout repository
+  pull-requests: write # Required for test workflow PR comments
 
 jobs:
   # Run tests before deployment
