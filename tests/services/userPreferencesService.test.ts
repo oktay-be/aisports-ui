@@ -10,6 +10,7 @@ import {
   loadPreferences,
   savePreferences,
   updatePreferences,
+  saveScraperConfigDebounced,
   DEFAULT_PREFERENCES,
   UserPreferences,
 } from '../../services/userPreferencesService';
@@ -175,6 +176,101 @@ describe('userPreferencesService', () => {
       expect(DEFAULT_PREFERENCES.lastScraperConfig?.region).toBe('tr');
       expect(DEFAULT_PREFERENCES.lastScraperConfig?.maxArticles).toBe(50);
       expect(DEFAULT_PREFERENCES.lastScraperConfig?.searchType).toBe('recent');
+    });
+  });
+
+  describe('saveScraperConfigDebounced', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('should debounce save calls', async () => {
+      vi.mocked(gcsApi.savePreferences).mockResolvedValue(undefined);
+
+      const scraperConfig = {
+        eu: { id: 'eu', name: 'Europe', keywords: ['test'], sources: [], scrapeDepth: 2 } as any,
+        tr: { id: 'tr', name: 'Turkey', keywords: ['test'], sources: [], scrapeDepth: 2 } as any,
+      };
+
+      // Call multiple times rapidly
+      saveScraperConfigDebounced(mockToken, scraperConfig);
+      saveScraperConfigDebounced(mockToken, scraperConfig);
+      saveScraperConfigDebounced(mockToken, scraperConfig);
+
+      // API should not be called yet
+      expect(gcsApi.savePreferences).not.toHaveBeenCalled();
+
+      // Advance timer past debounce delay
+      await vi.advanceTimersByTimeAsync(600);
+
+      // Should only be called once
+      expect(gcsApi.savePreferences).toHaveBeenCalledTimes(1);
+    });
+
+    it('should handle save errors gracefully', async () => {
+      vi.mocked(gcsApi.savePreferences).mockRejectedValue(new Error('Save failed'));
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const scraperConfig = {
+        eu: { id: 'eu', name: 'Europe', keywords: ['test'], sources: [], scrapeDepth: 2 } as any,
+        tr: { id: 'tr', name: 'Turkey', keywords: ['test'], sources: [], scrapeDepth: 2 } as any,
+      };
+
+      saveScraperConfigDebounced(mockToken, scraperConfig);
+
+      // Advance timer
+      await vi.advanceTimersByTimeAsync(600);
+
+      // The inner savePreferences function catches errors and logs them
+      expect(consoleSpy).toHaveBeenCalledWith(
+        'Error saving preferences:',
+        expect.any(Error)
+      );
+
+      consoleSpy.mockRestore();
+    });
+
+    it('should use custom delay', async () => {
+      vi.mocked(gcsApi.savePreferences).mockResolvedValue(undefined);
+
+      const scraperConfig = {
+        eu: { id: 'eu', name: 'Europe', keywords: ['test'], sources: [], scrapeDepth: 2 } as any,
+        tr: { id: 'tr', name: 'Turkey', keywords: ['test'], sources: [], scrapeDepth: 2 } as any,
+      };
+
+      // Use custom delay of 1000ms
+      saveScraperConfigDebounced(mockToken, scraperConfig, 1000);
+
+      // Advance timer less than custom delay
+      await vi.advanceTimersByTimeAsync(600);
+      expect(gcsApi.savePreferences).not.toHaveBeenCalled();
+
+      // Advance past custom delay
+      await vi.advanceTimersByTimeAsync(500);
+      expect(gcsApi.savePreferences).toHaveBeenCalledTimes(1);
+    });
+
+    it('should log success message', async () => {
+      vi.mocked(gcsApi.savePreferences).mockResolvedValue(undefined);
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      const scraperConfig = {
+        eu: { id: 'eu', name: 'Europe', keywords: ['test'], sources: [], scrapeDepth: 2 } as any,
+        tr: { id: 'tr', name: 'Turkey', keywords: ['test'], sources: [], scrapeDepth: 2 } as any,
+      };
+
+      saveScraperConfigDebounced(mockToken, scraperConfig);
+
+      // Advance timer
+      await vi.advanceTimersByTimeAsync(600);
+
+      expect(consoleSpy).toHaveBeenCalledWith('Scraper config auto-saved');
+
+      consoleSpy.mockRestore();
     });
   });
 });

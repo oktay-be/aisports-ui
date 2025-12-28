@@ -16,7 +16,9 @@ import react from '@vitejs/plugin-react';
  */
 
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, '.', '');
+  // Load .env.test for test mode
+  const envDir = mode === 'test' ? '.' : '.';
+  const env = loadEnv(mode, envDir, '');
 
   return {
     server: {
@@ -33,6 +35,23 @@ export default defineConfig(({ mode }) => {
       globals: true,
       environment: 'jsdom',
       setupFiles: './tests/setup.ts',
+      env: {
+        VITE_GCS_API_URL: 'http://localhost:8080',
+        VITE_GCS_API_KEY: 'test-api-key',
+      },
+      coverage: {
+        provider: 'v8',
+        reporter: ['text', 'json', 'html'],
+        include: ['services/**/*.ts', 'components/**/*.tsx'],
+        exclude: ['**/*.test.ts', '**/*.test.tsx', '**/node_modules/**'],
+        thresholds: {
+          // High thresholds - maintained at 90%+ coverage
+          lines: 90,
+          functions: 90,
+          branches: 80,
+          statements: 90,
+        },
+      },
     }
   };
 });
