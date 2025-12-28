@@ -34,12 +34,17 @@ permissions:
   contents: read # Allow checkout action to read the repository
 
 jobs:
+  # Run tests before deployment
+  test:
+    uses: ./.github/workflows/test-ui.yml
+
   # Calculate version using GitVersion
   version:
     uses: ./.github/workflows/gitversion.yml
 
   deploy:
-    needs: version
+    needs: [test, version]
+    if: ${{ needs.test.result == 'success' }}
     runs-on: ubuntu-latest
     env:
       APP_VERSION: ${{ needs.version.outputs.semVer }}

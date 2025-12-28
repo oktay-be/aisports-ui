@@ -1,0 +1,181 @@
+# =============================================================================
+# Test UI Application
+# =============================================================================
+# Runs Vitest with coverage for the aisports-ui React application.
+# Coverage reports are uploaded to Codecov and displayed in the
+# GitHub Actions summary.
+#
+# TRIGGERS:
+#   - Push to any branch with TypeScript/JavaScript file changes
+#   - Pull requests to main/dev branches
+#   - Manual trigger via workflow_dispatch
+#   - Called by other workflows via workflow_call
+#
+# OUTPUTS:
+#   - Coverage report in GitHub Actions summary
+#   - Coverage badge via Codecov
+#   - Test results in PR comments
+# =============================================================================
+
+name: Test UI Application
+
+on:
+  push:
+    branches:
+      - dev
+      - main
+      - 'feature/**'
+    paths:
+      - '**/*.ts'
+      - '**/*.tsx'
+      - '**/*.js'
+      - '**/*.jsx'
+      - 'tests/**'
+      - 'package.json'
+      - 'vitest.config.ts'
+      - '.github/workflows/test-ui.yml'
+  pull_request:
+    branches:
+      - main
+      - dev
+    paths:
+      - '**/*.ts'
+      - '**/*.tsx'
+      - '**/*.js'
+      - '**/*.jsx'
+      - 'tests/**'
+      - 'package.json'
+      - 'vitest.config.ts'
+  workflow_dispatch:
+  workflow_call:
+    outputs:
+      result:
+        description: 'Test result (success/failure)'
+        value: ${{ jobs.test.outputs.result }}
+      coverage:
+        description: 'Overall coverage percentage'
+        value: ${{ jobs.test.outputs.coverage }}
+
+permissions:
+  contents: read
+  pull-requests: write  # For PR comments
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    outputs:
+      result: ${{ steps.test.outcome }}
+      coverage: ${{ steps.coverage.outputs.percentage }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests with coverage
+        id: test
+        run: npm run test:coverage
+        continue-on-error: true
+
+      - name: Extract coverage percentage
+        id: coverage
+        if: always()
+        run: |
+          if [ -f coverage/coverage-summary.json ]; then
+            COVERAGE=$(node -e "const data=require('./coverage/coverage-summary.json'); console.log(data.total.lines.pct)")
+            echo "percentage=$COVERAGE" >> $GITHUB_OUTPUT
+            echo "Coverage: $COVERAGE%"
+          else
+            echo "percentage=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate coverage summary
+        if: always()
+        run: |
+          echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ steps.test.outcome }}" == "success" ]; then
+            echo "### Status: Passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### Status: Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "## Coverage Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f coverage/coverage-summary.json ]; then
+            echo "| Metric | Coverage |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|----------|" >> $GITHUB_STEP_SUMMARY
+
+            node << 'EOF' >> $GITHUB_STEP_SUMMARY
+          const data = require('./coverage/coverage-summary.json');
+          const total = data.total;
+
+          const status = (pct) => pct >= 60 ? '' : '';
+
+          console.log(`| Lines | ${total.lines.pct.toFixed(1)}% ${status(total.lines.pct)} |`);
+          console.log(`| Statements | ${total.statements.pct.toFixed(1)}% ${status(total.statements.pct)} |`);
+          console.log(`| Branches | ${total.branches.pct.toFixed(1)}% ${status(total.branches.pct)} |`);
+          console.log(`| Functions | ${total.functions.pct.toFixed(1)}% ${status(total.functions.pct)} |`);
+          EOF
+
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Overall Coverage: ${{ steps.coverage.outputs.percentage }}%**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Minimum required: 60%" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No coverage data available." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage/lcov.info
+          fail_ci_if_error: false
+          verbose: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-test-results
+          path: |
+            coverage/
+          retention-days: 30
+
+      - name: Check test result
+        if: steps.test.outcome == 'failure'
+        run: |
+          echo "Tests failed!"
+          exit 1
+
+      - name: Check coverage threshold
+        if: steps.test.outcome == 'success'
+        run: |
+          COVERAGE="${{ steps.coverage.outputs.percentage }}"
+          THRESHOLD=60
+
+          if [ -z "$COVERAGE" ] || [ "$COVERAGE" == "0" ]; then
+            echo "No coverage data available, skipping threshold check"
+            exit 0
+          fi
+
+          if (( $(echo "$COVERAGE < $THRESHOLD" | bc -l) )); then
+            echo "Coverage ($COVERAGE%) is below threshold ($THRESHOLD%)"
+            exit 1
+          fi
+
+          echo "Coverage ($COVERAGE%) meets threshold ($THRESHOLD%)"
