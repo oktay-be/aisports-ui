@@ -66,6 +66,9 @@ const App: React.FC = () => {
   const [isPrefetching, setIsPrefetching] = useState(false);
   const [prefetchComplete, setPrefetchComplete] = useState(false);
 
+  // App version
+  const [appVersion, setAppVersion] = useState<string>('dev');
+
   // Get today's date in YYYY-MM-DD format
   const getTodayDate = () => new Date().toISOString().split('T')[0];
 
@@ -133,6 +136,14 @@ const App: React.FC = () => {
     document.addEventListener('click', handleClickOutside);
     return () => document.removeEventListener('click', handleClickOutside);
   }, [showUserMenu]);
+
+  // Fetch app version on mount
+  useEffect(() => {
+    fetch('/api/version')
+      .then(res => res.json())
+      .then(data => setAppVersion(data.version))
+      .catch(() => setAppVersion('dev'));
+  }, []);
 
   // Google Sign-In Initialization
   useEffect(() => {
@@ -487,8 +498,11 @@ const App: React.FC = () => {
                          ADMIN
                        </span>
                      )}
+                     <span className="inline-block mt-1 ml-1 px-2 py-0.5 text-[10px] font-mono text-slate-500">
+                       v{appVersion}
+                     </span>
                    </div>
-                   
+
                    <div className="p-2 border-b border-slate-700">
                      <p className="px-2 py-1 text-xs font-medium text-slate-500 uppercase">Feed Filter</p>
                      <button

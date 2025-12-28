@@ -15,6 +15,11 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const port = process.env.PORT || 8080;
 
+// API endpoint to expose version
+app.get('/api/version', (req, res) => {
+  res.json({ version: process.env.APP_VERSION || 'dev' });
+});
+
 // Serve static files from dist/
 app.use(express.static('dist'));
 
