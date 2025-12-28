@@ -41,10 +41,16 @@ jobs:
   deploy:
     needs: version
     runs-on: ubuntu-latest
+    env:
+      APP_VERSION: ${{ needs.version.outputs.semVer }}
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
+
+    # Sanitize version for GCP labels (no dots allowed)
+    - name: Set version label
+      run: echo "VERSION_LABEL=$(echo '${{ env.APP_VERSION }}' | tr '.' '-' | tr -cd '[:alnum:]-_')" >> $GITHUB_ENV
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
@@ -81,7 +87,9 @@ jobs:
         source: .
         env_vars: |
           NODE_ENV=production
-          APP_VERSION=${{ needs.version.outputs.semVer }}
+          APP_VERSION=${{ env.APP_VERSION }}
+        labels: |
+          version=${{ env.VERSION_LABEL }}
         flags: |
           --allow-unauthenticated
           --service-account=${{ vars.GCP_SERVICE_ACCOUNT }}
@@ -98,6 +106,6 @@ jobs:
         echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
         echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
         echo "| Service | aisports-ui |" >> $GITHUB_STEP_SUMMARY
-        echo "| Version | ${{ needs.version.outputs.semVer }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Version | ${{ env.APP_VERSION }} |" >> $GITHUB_STEP_SUMMARY
         echo "| Branch | ${{ github.ref_name }} |" >> $GITHUB_STEP_SUMMARY
         echo "| Region | ${{ vars.REGION }} |" >> $GITHUB_STEP_SUMMARY
